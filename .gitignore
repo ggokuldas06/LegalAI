@@ -38,7 +38,7 @@ embeddings/
 models/
 lora_adapters/
 training_data/
-
+backend/api/rag/local_models/
 # VSCode
 .vscode/
 
