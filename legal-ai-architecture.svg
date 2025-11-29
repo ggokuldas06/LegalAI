@@ -1,0 +1,211 @@
+<svg viewBox="0 0 1200 1800" xmlns="http://www.w3.org/2000/svg" id="architecture-svg">
+            <!-- Define arrow marker -->
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                    <polygon points="0 0, 10 3, 0 6" fill="#34495e"/>
+                </marker>
+            </defs>
+            
+            <!-- CLIENT BROWSER LAYER -->
+            <rect x="50" y="50" width="1100" height="280" class="layer client-layer" rx="10"/>
+            <text x="600" y="80" class="title" text-anchor="middle" fill="#3498db">CLIENT BROWSER</text>
+            
+            <!-- Vue.js SPA -->
+            <rect x="100" y="100" width="1000" height="210" class="box box-client" rx="5"/>
+            <text x="600" y="125" class="subtitle" text-anchor="middle">Vue.js 3 SPA (Port 5173)</text>
+            
+            <!-- Views -->
+            <rect x="150" y="140" width="150" height="60" class="box" rx="3"/>
+            <text x="225" y="160" class="small-text" text-anchor="middle">Login</text>
+            <text x="225" y="175" class="small-text" text-anchor="middle">View</text>
+            
+            <rect x="320" y="140" width="150" height="60" class="box" rx="3"/>
+            <text x="395" y="160" class="small-text" text-anchor="middle">Chat</text>
+            <text x="395" y="175" class="small-text" text-anchor="middle">View</text>
+            
+            <rect x="490" y="140" width="150" height="60" class="box" rx="3"/>
+            <text x="565" y="160" class="small-text" text-anchor="middle">Docs</text>
+            <text x="565" y="175" class="small-text" text-anchor="middle">View</text>
+            
+            <rect x="660" y="140" width="150" height="60" class="box" rx="3"/>
+            <text x="735" y="160" class="small-text" text-anchor="middle">History</text>
+            <text x="735" y="175" class="small-text" text-anchor="middle">View</text>
+            
+            <rect x="830" y="140" width="150" height="60" class="box" rx="3"/>
+            <text x="905" y="160" class="small-text" text-anchor="middle">Settings</text>
+            <text x="905" y="175" class="small-text" text-anchor="middle">View</text>
+            
+            <!-- Pinia Stores -->
+            <text x="200" y="230" class="subtitle">State Management (Pinia)</text>
+            <rect x="150" y="240" width="100" height="40" class="box" rx="3"/>
+            <text x="200" y="265" class="small-text" text-anchor="middle">Auth</text>
+            
+            <rect x="270" y="240" width="100" height="40" class="box" rx="3"/>
+            <text x="320" y="265" class="small-text" text-anchor="middle">Chat</text>
+            
+            <rect x="390" y="240" width="120" height="40" class="box" rx="3"/>
+            <text x="450" y="265" class="small-text" text-anchor="middle">Documents</text>
+            
+            <rect x="530" y="240" width="100" height="40" class="box" rx="3"/>
+            <text x="580" y="265" class="small-text" text-anchor="middle">History</text>
+            
+            <!-- API Service Layer -->
+            <text x="750" y="230" class="subtitle">API Service (Axios)</text>
+            <text x="750" y="250" class="small-text">• JWT Token Management</text>
+            <text x="750" y="265" class="small-text">• Request/Response Interceptors</text>
+            <text x="750" y="280" class="small-text">• Error Handling</text>
+            
+            <!-- Arrow: Client to Backend -->
+            <line x1="600" y1="330" x2="600" y2="380" class="arrow"/>
+            <text x="620" y="360" class="small-text">HTTP/REST API (JSON)</text>
+            
+            <!-- DJANGO BACKEND LAYER -->
+            <rect x="50" y="400" width="1100" height="1350" class="layer api-layer" rx="10"/>
+            <text x="600" y="430" class="title" text-anchor="middle" fill="#2ecc71">DJANGO BACKEND (Port 8000)</text>
+            
+            <!-- API Layer -->
+            <rect x="100" y="450" width="1000" height="120" class="box box-api" rx="5"/>
+            <text x="600" y="475" class="subtitle" text-anchor="middle">API Layer (Django REST Framework)</text>
+            
+            <rect x="150" y="490" width="180" height="60" class="box" rx="3"/>
+            <text x="240" y="515" class="small-text" text-anchor="middle">Auth Views</text>
+            <text x="240" y="530" class="small-text" text-anchor="middle">login, register</text>
+            
+            <rect x="360" y="490" width="180" height="60" class="box" rx="3"/>
+            <text x="450" y="515" class="small-text" text-anchor="middle">Chat Views</text>
+            <text x="450" y="530" class="small-text" text-anchor="middle">streaming</text>
+            
+            <rect x="570" y="490" width="180" height="60" class="box" rx="3"/>
+            <text x="660" y="515" class="small-text" text-anchor="middle">Document Views</text>
+            <text x="660" y="530" class="small-text" text-anchor="middle">upload, manage</text>
+            
+            <rect x="780" y="490" width="180" height="60" class="box" rx="3"/>
+            <text x="870" y="515" class="small-text" text-anchor="middle">RAG Views</text>
+            <text x="870" y="530" class="small-text" text-anchor="middle">ingest, search</text>
+            
+            <!-- Middleware -->
+            <text x="150" y="600" class="subtitle">Middleware:</text>
+            <text x="150" y="620" class="small-text">• JWT Authentication</text>
+            <text x="150" y="635" class="small-text">• Rate Limiting (30/hr)</text>
+            <text x="350" y="620" class="small-text">• CORS Headers</text>
+            <text x="350" y="635" class="small-text">• Request Logging</text>
+            
+            <!-- Business Logic Layer -->
+            <rect x="100" y="670" width="1000" height="220" class="box box-business" rx="5"/>
+            <text x="600" y="695" class="subtitle" text-anchor="middle">Business Logic Layer</text>
+            
+            <!-- Inference Service -->
+            <rect x="130" y="710" width="280" height="160" class="box" rx="3"/>
+            <text x="270" y="730" class="small-text" text-anchor="middle" font-weight="bold">Inference Service</text>
+            <rect x="150" y="745" width="100" height="35" class="box" rx="2"/>
+            <text x="200" y="767" class="small-text" text-anchor="middle">Prompt Builder</text>
+            <rect x="270" y="745" width="120" height="35" class="box" rx="2"/>
+            <text x="330" y="767" class="small-text" text-anchor="middle">Post Processor</text>
+            <text x="270" y="800" class="small-text" text-anchor="middle">• Mode A: Summarizer</text>
+            <text x="270" y="815" class="small-text" text-anchor="middle">• Mode B: Clause Classifier</text>
+            <text x="270" y="830" class="small-text" text-anchor="middle">• Mode C: Case-Law IRAC</text>
+            <text x="270" y="850" class="small-text" text-anchor="middle">Citation validation</text>
+            
+            <!-- RAG System -->
+            <rect x="430" y="710" width="280" height="160" class="box" rx="3"/>
+            <text x="570" y="730" class="small-text" text-anchor="middle" font-weight="bold">RAG System</text>
+            <rect x="450" y="745" width="80" height="35" class="box" rx="2"/>
+            <text x="490" y="767" class="small-text" text-anchor="middle">Chunker</text>
+            <rect x="550" y="745" width="80" height="35" class="box" rx="2"/>
+            <text x="590" y="767" class="small-text" text-anchor="middle">Embedder</text>
+            <rect x="450" y="795" width="120" height="35" class="box" rx="2"/>
+            <text x="510" y="817" class="small-text" text-anchor="middle">Retrieval Service</text>
+            <text x="570" y="850" class="small-text" text-anchor="middle">Semantic search + filters</text>
+            
+            <!-- Document Processing -->
+            <rect x="730" y="710" width="330" height="160" class="box" rx="3"/>
+            <text x="895" y="730" class="small-text" text-anchor="middle" font-weight="bold">Document Processing</text>
+            <rect x="760" y="745" width="110" height="35" class="box" rx="2"/>
+            <text x="815" y="767" class="small-text" text-anchor="middle">PDF Parser</text>
+            <rect x="890" y="745" width="110" height="35" class="box" rx="2"/>
+            <text x="945" y="767" class="small-text" text-anchor="middle">Text Extractor</text>
+            <text x="895" y="800" class="small-text" text-anchor="middle">Supports: PDF, TXT</text>
+            <text x="895" y="815" class="small-text" text-anchor="middle">Max size: 10MB</text>
+            <text x="895" y="830" class="small-text" text-anchor="middle">SHA256 deduplication</text>
+            
+            <!-- LLM Inference Layer -->
+            <rect x="100" y="920" width="1000" height="220" class="box box-llm" rx="5"/>
+            <text x="600" y="945" class="subtitle" text-anchor="middle">LLM Inference Layer</text>
+            
+            <rect x="150" y="965" width="900" height="160" class="box" rx="3"/>
+            <text x="600" y="990" class="small-text" text-anchor="middle" font-weight="bold">llama-cpp-python Runtime</text>
+            
+            <rect x="200" y="1010" width="800" height="50" class="box" rx="2"/>
+            <text x="600" y="1030" class="small-text" text-anchor="middle">LLaMA 2 7B Chat (Q4_K_M GGUF)</text>
+            <text x="600" y="1045" class="small-text" text-anchor="middle">Context: 4096 tokens | CPU Threads: 8 | Quantization: 4-bit</text>
+            
+            <rect x="200" y="1070" width="800" height="40" class="box" rx="2"/>
+            <text x="600" y="1085" class="small-text" text-anchor="middle">Optional: LoRA Adapters</text>
+            <text x="600" y="1100" class="small-text" text-anchor="middle">Legal tone adapter | Task-specific adapters</text>
+            
+            <!-- Storage Layer -->
+            <rect x="100" y="1170" width="1000" height="240" class="box box-storage" rx="5"/>
+            <text x="600" y="1195" class="subtitle" text-anchor="middle">Storage Layer</text>
+            
+            <!-- SQLite -->
+            <rect x="150" y="1220" width="280" height="170" class="box" rx="3"/>
+            <text x="290" y="1240" class="small-text" text-anchor="middle" font-weight="bold">SQLite Database</text>
+            <rect x="170" y="1255" width="90" height="30" class="box" rx="2"/>
+            <text x="215" y="1275" class="small-text" text-anchor="middle">Users</text>
+            <rect x="270" y="1255" width="90" height="30" class="box" rx="2"/>
+            <text x="315" y="1275" class="small-text" text-anchor="middle">ChatLogs</text>
+            <rect x="170" y="1295" width="90" height="30" class="box" rx="2"/>
+            <text x="215" y="1315" class="small-text" text-anchor="middle">Documents</text>
+            <rect x="270" y="1295" width="90" height="30" class="box" rx="2"/>
+            <text x="315" y="1315" class="small-text" text-anchor="middle">Chunks</text>
+            <rect x="170" y="1335" width="90" height="30" class="box" rx="2"/>
+            <text x="215" y="1355" class="small-text" text-anchor="middle">AuditLog</text>
+            <rect x="270" y="1335" width="90" height="30" class="box" rx="2"/>
+            <text x="315" y="1355" class="small-text" text-anchor="middle">Settings</text>
+            
+            <!-- Vector Store -->
+            <rect x="460" y="1220" width="280" height="170" class="box" rx="3"/>
+            <text x="600" y="1240" class="small-text" text-anchor="middle" font-weight="bold">Vector Store (NumPy)</text>
+            <rect x="480" y="1260" width="240" height="120" class="box" rx="2"/>
+            <text x="600" y="1280" class="small-text" text-anchor="middle">Embeddings (384d)</text>
+            <text x="600" y="1295" class="small-text" text-anchor="middle">+</text>
+            <text x="600" y="1310" class="small-text" text-anchor="middle">Metadata</text>
+            <text x="600" y="1330" class="small-text" text-anchor="middle">Cosine similarity search</text>
+            <text x="600" y="1345" class="small-text" text-anchor="middle">Filtered by jurisdiction/year</text>
+            <text x="600" y="1365" class="small-text" text-anchor="middle">M4 Mac optimized</text>
+            
+            <!-- File System -->
+            <rect x="770" y="1220" width="280" height="170" class="box" rx="3"/>
+            <text x="910" y="1240" class="small-text" text-anchor="middle" font-weight="bold">File System</text>
+            <rect x="790" y="1260" width="240" height="50" class="box" rx="2"/>
+            <text x="910" y="1280" class="small-text" text-anchor="middle">Documents</text>
+            <text x="910" y="1295" class="small-text" text-anchor="middle">(PDFs / TXT files)</text>
+            <rect x="790" y="1320" width="240" height="50" class="box" rx="2"/>
+            <text x="910" y="1340" class="small-text" text-anchor="middle">Models (GGUF)</text>
+            <text x="910" y="1355" class="small-text" text-anchor="middle">LLaMA 2 7B Q4_K_M</text>
+            
+            <!-- Background Tasks -->
+            <rect x="100" y="1440" width="1000" height="160" class="box box-task" rx="5"/>
+            <text x="600" y="1465" class="subtitle" text-anchor="middle">Background Task Layer (Celery)</text>
+            
+            <rect x="200" y="1490" width="220" height="60" class="box" rx="3"/>
+            <text x="310" y="1510" class="small-text" text-anchor="middle">Document</text>
+            <text x="310" y="1525" class="small-text" text-anchor="middle">Ingestion</text>
+            <text x="310" y="1540" class="small-text" text-anchor="middle">(Async)</text>
+            
+            <rect x="460" y="1490" width="220" height="60" class="box" rx="3"/>
+            <text x="570" y="1510" class="small-text" text-anchor="middle">Embedding</text>
+            <text x="570" y="1525" class="small-text" text-anchor="middle">Generation</text>
+            <text x="570" y="1540" class="small-text" text-anchor="middle">(Batch)</text>
+            
+            <rect x="720" y="1490" width="220" height="60" class="box" rx="3"/>
+            <text x="830" y="1510" class="small-text" text-anchor="middle">Batch</text>
+            <text x="830" y="1525" class="small-text" text-anchor="middle">Evaluation</text>
+            
+            <text x="600" y="1580" class="subtitle" text-anchor="middle">Redis Message Broker (Port 6379)</text>
+            
+            <!-- Key Features Box -->
+            <rect x="50" y="1780" width="1100" height="50" class="box" rx="5" fill="#e8f8f5"/>
+            <text x="600" y="1800" class="small-text" text-anchor="middle" font-weight="bold">Key Features:</text>
+            <text x="600" y="1815" class="small-text" text-anchor="middle">100% Local | CPU-Optimized | Privacy-Preserving | RAG-Powered | JWT Auth | M4 Mac Compatible</text>
+        </svg>

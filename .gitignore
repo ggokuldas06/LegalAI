@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.eggs/
+*.sqlite3
+
+# Virtual environment
+venv/
+.env
+.python-version
+
+# Django
+*.log
+logs/
+media/
+staticfiles/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.vite
+frontend/dist/
+
+# Environment
+.env*
+
+# macOS
+.DS_Store
+
+# Redis / DB Dumps
+dump.rdb
+
+# RAG Data
+embeddings/
+models/
+lora_adapters/
+training_data/
+
+# VSCode
+.vscode/
+
+# Build
+public/
+
+# Temporary
+*.tmp
+*.temp
+*.swp
+*.swo

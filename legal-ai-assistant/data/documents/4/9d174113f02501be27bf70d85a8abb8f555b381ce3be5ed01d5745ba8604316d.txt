@@ -1,0 +1,211 @@
+MASTER PROFESSIONAL SERVICES & TECHNOLOGY INTEGRATION AGREEMENT
+Effective Date: January 10, 2024
+
+This Master Professional Services & Technology Integration Agreement (“Agreement”) is entered into between:
+
+Client: Horizon Biomedical Research Institute (“Client”)
+Service Provider: Vertex Systems Integrations, LLC (“Service Provider”)
+
+The Parties agree as follows:
+
+------------------------------------------------------------
+SECTION 1 — DEFINITIONS
+------------------------------------------------------------
+1.1 “Affiliate” means any entity that controls, is controlled by, or is under common control with a Party.
+
+1.2 “Authorized Personnel” means employees, contractors, or agents who have executed confidentiality agreements consistent with this Agreement.
+
+1.3 “Background Technology” includes pre-existing software, templates, tools, libraries, documentation, methods, and processes owned or controlled by Service Provider prior to the Effective Date.
+
+1.4 “Client Materials” means data, research outputs, specifications, datasets, logs, device telemetry, and any other information provided by Client.
+
+1.5 “Compliance Standards” refers to HIPAA, NIST SP 800-53, ISO 27001, and any additional applicable laws or industry standards.
+
+1.6 “Deliverables” include work product, documentation, integration connectors, software modules, dashboards, data pipelines, testing results, and prototypes produced under this Agreement.
+
+1.7 “Milestones” means the project checkpoints as defined in Exhibit B.
+
+1.8 “Project Change Request (PCR)” means a written request to modify scope, cost, or timeline.
+
+1.9 “Security Incident” means any unauthorized disclosure, access, alteration, or misuse of Client Materials.
+
+1.10 “Services” means consulting, development, engineering, testing, documentation, project management, and support provided by Service Provider.
+
+1.11 “Work Product” means anything created by Service Provider during the performance of Services.
+
+------------------------------------------------------------
+SECTION 2 — SCOPE OF SERVICES
+------------------------------------------------------------
+2.1 Service Provider shall provide:
+(a) data ingestion pipeline development;
+(b) secure biomedical device integration;
+(c) real-time anomaly detection setup;
+(d) cloud-to-local replication architecture;
+(e) compliance-aligned documentation;
+(f) monitoring dashboards;
+(g) automated workflow systems;
+(h) API development and integration.
+
+2.2 Project Phases:
+Phase I – Architecture & Planning (6 weeks)
+Phase II – Development & Integration (14 weeks)
+Phase III – Validation, Testing & Knowledge Transfer (10 weeks)
+Phase IV – Deployment Support & Stabilization (6 weeks)
+Phase V – Optional Long-Term Maintenance (annual renewal)
+
+2.3 Weekly progress meetings with Client’s Technical Director are required.
+
+2.4 Service Provider shall maintain detailed engineering logs, design drafts, Git commit history, and deployment notes.
+
+2.5 Any additional features shall require a PCR.
+
+------------------------------------------------------------
+SECTION 3 — PAYMENT TERMS
+------------------------------------------------------------
+3.1 Fees:
+$250/hour software engineering
+$300/hour compliance consulting
+$200/hour QA and testing
+$175/hour documentation drafting
+
+3.2 Invoices issued monthly with detailed time logs, task breakdowns, and descriptions.
+
+3.3 Late Payment: Any amount not paid within 30 days incurs 1.25% monthly interest.
+
+3.4 Expenses reimbursable with receipts: travel, lodging, specialized equipment, temporary lab access fees.
+
+3.5 Client may request budget forecasts, burn-rate summaries, and projected completion-cost models.
+
+------------------------------------------------------------
+SECTION 4 — CONFIDENTIALITY
+------------------------------------------------------------
+4.1 Each Party will protect Confidential Information with the same degree of care it uses for its own confidential information.
+
+4.2 Confidentiality obligations last 5 years after termination.
+
+4.3 Forbidden activities include:
+(a) disclosure of research data to third parties;
+(b) reverse engineering or decoding proprietary systems;
+(c) transmitting or storing Client data in unapproved cloud environments;
+(d) retaining Client datasets post-termination.
+
+4.4 Confidential Information may only be shared with Authorized Personnel on a need-to-know basis.
+
+4.5 Service Provider shall maintain logs of all personnel with access to Client Materials.
+
+------------------------------------------------------------
+SECTION 5 — INTELLECTUAL PROPERTY
+------------------------------------------------------------
+5.1 Client owns all Deliverables and Work Product created during the engagement.
+
+5.2 Service Provider retains full ownership of Background Technology.
+
+5.3 Service Provider grants Client a perpetual, irrevocable, worldwide, royalty-free license to use Background Technology only as embedded in Deliverables.
+
+5.4 Service Provider must disclose all open-source components and confirm compliance with license obligations.
+
+5.5 Jointly developed IP will be owned jointly unless otherwise specified.
+
+------------------------------------------------------------
+SECTION 6 — DATA SECURITY & COMPLIANCE
+------------------------------------------------------------
+6.1 Systems and Services must comply with:
+HIPAA
+NIST SP 800-53
+ISO 27001
+Client’s internal security protocols
+
+6.2 Service Provider shall implement:
+network segmentation
+encryption in-transit and at-rest
+access control with MFA
+audit logging
+quarterly penetration testing
+endpoint monitoring
+secure key management
+
+6.3 Any Security Incident must be reported within 24 hours, including:
+description of the incident
+data affected
+containment measures
+remediation plan
+
+6.4 Service Provider shall maintain incident logs for a minimum of 7 years.
+
+6.5 Data retention policies must be documented and approved by Client.
+
+------------------------------------------------------------
+SECTION 7 — WARRANTIES
+------------------------------------------------------------
+7.1 Service Provider warrants that:
+(a) Deliverables meet specifications in Exhibit A;
+(b) work will be performed professionally and in accordance with industry standards;
+(c) no malicious code or harmful software will be introduced;
+(d) Deliverables will not knowingly infringe third-party IP.
+
+7.2 Disclaimer: Except as explicitly stated, all Deliverables are provided “AS-IS.”
+
+------------------------------------------------------------
+SECTION 8 — INDEMNIFICATION
+------------------------------------------------------------
+8.1 Service Provider shall indemnify Client for:
+(a) IP infringement claims arising from Deliverables;
+(b) data breaches caused by Service Provider negligence;
+(c) bodily injury or property damage caused by Services;
+(d) gross negligence or willful misconduct.
+
+8.2 Client shall indemnify Service Provider for claims arising from Client’s misuse of Deliverables.
+
+------------------------------------------------------------
+SECTION 9 — LIMITATION OF LIABILITY
+------------------------------------------------------------
+9.1 Neither Party shall be liable for indirect, incidental, special, consequential, or punitive damages.
+
+9.2 Total liability shall not exceed fees paid by Client in the previous 6 months.
+
+9.3 These limitations do not apply to confidentiality breaches, IP infringement, or data security violations.
+
+------------------------------------------------------------
+SECTION 10 — TERMINATION
+------------------------------------------------------------
+10.1 Either Party may terminate with 30 days’ written notice.
+
+10.2 Immediate termination permitted for:
+material breach
+fraud or misconduct
+violation of data security requirements
+
+10.3 Upon termination, Client must pay for all Services performed to date.
+
+10.4 Service Provider must return or destroy Client Materials within 10 days.
+
+10.5 Final documentation, code, and artifacts must be delivered within 15 days post-termination.
+
+------------------------------------------------------------
+SECTION 11 — GOVERNING LAW
+------------------------------------------------------------
+11.1 This Agreement is governed by California law.
+
+11.2 Exclusive venue is San Mateo County, California.
+
+------------------------------------------------------------
+SECTION 12 — MISCELLANEOUS
+------------------------------------------------------------
+12.1 Assignment requires prior written consent.
+
+12.2 Amendments must be in writing and signed by both Parties.
+
+12.3 This Agreement supersedes all prior agreements relating to the subject matter.
+
+12.4 If any provision is invalid, the remaining provisions remain in effect.
+
+12.5 Neither Party shall be considered in breach to the extent performance is delayed due to force majeure events, including natural disasters, power failures, pandemics, war, sanctions, or supply-chain collapse.
+
+------------------------------------------------------------
+EXHIBITS
+------------------------------------------------------------
+Exhibit A – Technical Specifications
+Exhibit B – Project Schedule and Milestones
+Exhibit C – Security Controls and Protocols
+Exhibit D – Data Handling & Retention Policies
+Exhibit E – Support & Maintenance Service Levels

@@ -1,0 +1,26 @@
+SMITH v. JONES CORPORATION
+    
+United States District Court, Southern District of California
+Filed: March 15, 2020
+
+BACKGROUND
+
+This case involves a wrongful termination claim. The plaintiff, Jane Smith, was employed by Jones Corporation from January 2018 to December 2019.
+
+LEGAL STANDARD
+
+Under California Labor Code § 2922, employment relationships are presumed to be at-will unless modified by contract. An at-will employee may be terminated for any lawful reason or no reason at all.
+
+However, wrongful termination claims can proceed when termination violates public policy. See Tameny v. Atlantic Richfield Co., 27 Cal.3d 167 (1980).
+
+ANALYSIS
+
+The plaintiff alleges she was terminated in retaliation for reporting safety violations to OSHA. Retaliation for reporting workplace safety concerns violates public policy.
+
+The court finds that plaintiff has stated a cognizable claim for wrongful termination in violation of public policy.
+
+CONCLUSION
+
+Defendant's motion to dismiss is DENIED. This case will proceed to discovery.
+
+[TEST RUN ID: d27c2f31]

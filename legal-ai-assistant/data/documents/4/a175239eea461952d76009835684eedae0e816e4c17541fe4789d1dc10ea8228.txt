@@ -1,0 +1,129 @@
+MASTER PROFESSIONAL SERVICES & TECHNOLOGY INTEGRATION AGREEMENT  
+Effective Date: January 10, 2024  
+
+This Master Professional Services & Technology Integration Agreement (“Agreement”) is entered into between:
+
+Client: Horizon Biomedical Research Institute (“Client”)  
+Service Provider: Vertex Systems Integrations, LLC (“Service Provider”)  
+
+WHEREAS, Client conducts advanced medical-device R&D requiring secure data handling and specialized software systems;  
+WHEREAS, Service Provider provides professional consulting, data-engineering, and systems-integration services;  
+NOW, THEREFORE, the Parties agree as follows:
+
+--------------------------------------
+SECTION 1 — DEFINITIONS
+--------------------------------------
+1.1 “Deliverables” means analytics dashboards, automated workflows, integration scripts, documentation, and other work products developed under this Agreement.
+1.2 “Confidential Information” means all non-public scientific, technical, financial, operational, or strategic information disclosed orally or in writing.
+1.3 “Background Technology” includes tools, libraries, code frameworks, and methodologies developed independently by Service Provider prior to the Effective Date.
+1.4 “Project Schedule” refers to the timeline set forth in Exhibit B.
+
+--------------------------------------
+SECTION 2 — SCOPE OF SERVICES
+--------------------------------------
+2.1 Service Provider shall perform:  
+(a) data-ingestion pipeline development;  
+(b) cross-platform device integration;  
+(c) real-time anomaly detection setup;  
+(d) cloud-to-local replication configuration;  
+(e) compliance-aligned system documentation.
+
+2.2 Services will be delivered in three phases:
+- **Phase I – Architecture Review & Planning** (6 weeks)  
+- **Phase II – Development & Integration** (14 weeks)  
+- **Phase III – Validation, Testing & Knowledge Transfer** (10 weeks)
+
+2.3 Weekly progress meetings shall be held with the Client’s Technical Director.
+
+--------------------------------------
+SECTION 3 — PAYMENT TERMS
+--------------------------------------
+3.1 Fees. Client shall compensate Service Provider at **$250/hour** for engineering work and **$300/hour** for compliance-oriented consulting.  
+3.2 Monthly Invoicing. Invoices must include itemized time logs.  
+3.3 Late Payments. Any invoice not paid within **30 days** accrues **1.25% monthly interest**.  
+3.4 Travel Expenses. Reasonable travel expenses are reimbursable with receipts.
+
+--------------------------------------
+SECTION 4 — CONFIDENTIALITY
+--------------------------------------
+4.1 Both Parties must maintain strict confidentiality over Confidential Information.  
+4.2 Confidentiality obligations survive for **5 years** following termination.  
+4.3 Forbidden Activities. Parties shall not:  
+(a) disclose scientific research data to third parties;  
+(b) decompile or reverse engineer proprietary tools;  
+(c) store Client data in non-approved cloud environments.
+
+--------------------------------------
+SECTION 5 — INTELLECTUAL PROPERTY
+--------------------------------------
+5.1 Client owns all Deliverables.  
+5.2 Service Provider retains rights to Background Technology.  
+5.3 Licensing. Service Provider grants Client a **perpetual, worldwide, royalty-free license** to use Background Technology strictly as embedded within Deliverables.  
+5.4 Open Source. Service Provider must disclose use of any GPL or copyleft components.
+
+--------------------------------------
+SECTION 6 — DATA SECURITY & COMPLIANCE
+--------------------------------------
+6.1 Systems must comply with:  
+(a) HIPAA data-protection standards;  
+(b) NIST SP 800-53 security controls;  
+(c) Client's internal security protocols.
+
+6.2 Service Provider shall implement:  
+- network segmentation;  
+- encryption in transit and at rest;  
+- audit logging;  
+- quarterly penetration testing.
+
+6.3 Any security incident must be reported within **24 hours**.
+
+--------------------------------------
+SECTION 7 — WARRANTIES
+--------------------------------------
+7.1 Service Provider warrants:  
+(a) Deliverables will conform to specifications in Exhibit A;  
+(b) services will be performed professionally;  
+(c) no intentional malware or harmful code will be introduced.
+
+7.2 Disclaimer. Except as stated, Deliverables are provided “AS-IS.”
+
+--------------------------------------
+SECTION 8 — INDEMNIFICATION
+--------------------------------------
+8.1 Service Provider indemnifies Client for:  
+(a) IP infringement claims arising from Deliverables;  
+(b) data breaches caused by Service Provider;  
+(c) gross negligence or willful misconduct.
+
+--------------------------------------
+SECTION 9 — LIMITATION OF LIABILITY
+--------------------------------------
+9.1 Neither Party is liable for consequential damages.  
+9.2 Aggregate liability cap: **fees paid in the previous 6 months**.
+
+--------------------------------------
+SECTION 10 — TERMINATION
+--------------------------------------
+10.1 Either Party may terminate with **30 days’ notice**.  
+10.2 Immediate termination applies in case of material breach.  
+10.3 Upon termination, Client must pay for all hours worked.
+
+--------------------------------------
+SECTION 11 — GOVERNING LAW
+--------------------------------------
+11.1 Governed by the laws of California.  
+11.2 Venue: San Mateo County.
+
+--------------------------------------
+SECTION 12 — MISCELLANEOUS
+--------------------------------------
+12.1 Assignment requires written consent.  
+12.2 Amendments must be in writing.  
+12.3 Entire Agreement supersedes prior agreements.
+
+--------------------------------------
+EXHIBITS  
+Exhibit A – Technical Specifications  
+Exhibit B – Project Schedule  
+Exhibit C – Security Protocols
+--------------------------------------

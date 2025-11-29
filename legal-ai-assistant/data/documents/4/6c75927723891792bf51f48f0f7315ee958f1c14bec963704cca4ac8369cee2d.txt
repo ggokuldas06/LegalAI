@@ -1,0 +1,29 @@
+FACTS:  
+On October 12, 2017, Plaintiff Lisa Anderson boarded a Metro Transit Authority (“MTA”) commuter train. While walking between cars, Anderson slipped on a puddle of hydraulic fluid that had leaked from an overhead maintenance valve. The passageway had poor lighting, and no warning signs were posted. Anderson sustained a torn ligament requiring surgery.
+
+Evidence included:  
+- maintenance logs showing the leak was reported 48 hours earlier;  
+- internal emails acknowledging insufficient lighting in connector cars;  
+- surveillance footage showing six employees walked past the puddle without addressing it.
+
+PROCEDURAL HISTORY:  
+The trial court ruled in Anderson’s favor. MTA appealed.
+
+ISSUE:  
+Whether MTA breached its duty of care by failing to remedy or warn passengers of a known hazardous condition.
+
+RULE:  
+Common-carrier operators owe passengers the **highest duty of care**, including diligent inspection, timely remediation of known hazards, and sufficient warnings.  
+Relevant precedents include:  
+- *Lopez v. City Rail Corp.* (2010): failure to warn constitutes breach.  
+- *Harris v. Western Transit* (2014): constructive notice established where hazard existed for extended period.  
+- *Dunn v. United Rail* (2012): inadequate lighting contributes to breach.
+
+APPLICATION:  
+MTA had actual notice via maintenance reports submitted two days before the incident. Despite this, no corrective maintenance occurred. The puddle remained untreated, with employees walking past it. Poor lighting further increased risk. Under *Harris*, constructive notice alone would suffice; here, actual notice existed.  
+Furthermore, under *Lopez*, failure to warn—even temporary—constitutes breach.  
+MTA argued staffing shortages, but *United Rail* rejected similar defenses.
+
+CONCLUSION:  
+MTA breached its duty of care and is liable for negligence. Judgment affirmed.
+
