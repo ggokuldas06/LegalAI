@@ -305,3 +305,6 @@ Users can upload contracts or case documents, stream model responses, and export
 
 LegalAI prioritizes privacy, explainability, and accuracy, producing citation-backed responses with no external dependencies. It provides a practical and auditable platform for legal analysis, research, and internal decision support.
 
+---
+## **Demonstration Video**
+https://drive.google.com/file/d/1c0lpTx2dCHFbXRedJ3ihi_L3vXdfcp8l/view?usp=sharing
