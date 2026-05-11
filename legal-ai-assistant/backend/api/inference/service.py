@@ -1,23 +1,23 @@
 # api/inference/service.py
 import time
 import logging
-from typing import Dict, Any, Optional, Iterator
+from typing import Dict, Any, Optional, Iterator, List
 from django.conf import settings
 
 from .llm_engine import llm_engine
-from .prompts import PromptBuilder
+from .prompts import PromptBuilder, LEGAL_DISCLAIMER
 from .post_processor import ResponseProcessor
 
 logger = logging.getLogger(__name__)
 
 
 class InferenceService:
-    """High-level service for LLM inference"""
-    
+    """High-level service for Ollama-backed LLM inference."""
+
     def __init__(self):
         self.engine = llm_engine
         self.processor = ResponseProcessor()
-    
+
     def chat(
         self,
         mode: str,
@@ -28,163 +28,111 @@ class InferenceService:
         filters: Optional[Dict] = None,
         settings_override: Optional[Dict] = None,
         stream: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Process chat request
-        
-        Args:
-            mode: 'A', 'B', or 'C'
-            message: User message
-            document_text: Document text for modes A/B
-            document_title: Document title
-            context_passages: Retrieved passages for mode C
-            filters: Filters for mode C
-            settings_override: Custom inference settings
-            stream: Whether to stream response
-        
-        Returns:
-            Dict with response and metadata
-        """
-        start_time = time.time()
-        
+    ) -> Any:
+        start = time.time()
         try:
-            # Build prompt
-            prompt_kwargs = {'mode': mode}
-            
-            if mode == 'A':
+            # Build messages list for Ollama chat API
+            kwargs: Dict = {"mode": mode}
+            if mode == "A":
                 if not document_text:
                     raise ValueError("document_text required for mode A")
-                prompt_kwargs.update({
-                    'document_text': document_text,
-                    'document_title': document_title or 'Untitled',
-                })
-            
-            elif mode == 'B':
+                kwargs.update(
+                    document_text=document_text,
+                    document_title=document_title or "Untitled",
+                )
+            elif mode == "B":
                 if not document_text:
                     raise ValueError("document_text required for mode B")
-                prompt_kwargs.update({
-                    'document_text': document_text,
-                    'document_title': document_title or 'Untitled',
-                })
-            
-            elif mode == 'C':
-                prompt_kwargs.update({
-                    'question': message,
-                    'context_passages': context_passages or [],
-                })
-            
-            prompt = PromptBuilder.build_prompt(**prompt_kwargs)
-            
-            # Get inference settings
+                kwargs.update(
+                    document_text=document_text,
+                    document_title=document_title or "Untitled",
+                )
+            elif mode == "C":
+                kwargs.update(
+                    question=message,
+                    context_passages=context_passages or [],
+                )
+
+            messages = PromptBuilder.build_messages(**kwargs)
+
+            # Merge inference settings
             model_config = settings.MODEL_CONFIG.copy()
             if settings_override:
                 model_config.update(settings_override)
-            
-            # Count input tokens
-            tokens_in = self.engine.count_tokens(prompt)
-            
-            # Generate response
+
+            gen_kwargs = {
+                "max_tokens": model_config.get("max_tokens", 1024),
+                "temperature": model_config.get("temperature", 0.7),
+                "top_p": model_config.get("top_p", 0.9),
+                "top_k": model_config.get("top_k", 50),
+            }
+
+            tokens_in = self.engine.count_tokens(
+                " ".join(m["content"] for m in messages)
+            )
+
             if stream:
-                return self._stream_response(
-                    prompt=prompt,
-                    mode=mode,
-                    tokens_in=tokens_in,
-                    **model_config
-                )
-            else:
-                response = self.engine.generate(
-                    prompt=prompt,
-                    max_tokens=model_config.get('max_tokens', 256),
-                    temperature=model_config.get('temperature', 0.7),
-                    top_p=model_config.get('top_p', 0.9),
-                    top_k=model_config.get('top_k', 50),
-                )
-                
-                # Process response
-                processed = self._process_response(mode, response['text'])
-                
-                # Add disclaimer
-                if processed.get('success'):
-                    final_text = self.processor.add_disclaimer(response['text'])
-                else:
-                    final_text = response['text']
-                
-                latency_ms = int((time.time() - start_time) * 1000)
-                
-                return {
-                    'success': True,
-                    'mode': mode,
-                    'response': final_text,
-                    'processed': processed,
-                    'tokens_in': tokens_in,
-                    'tokens_out': response['tokens_generated'],
-                    'latency_ms': latency_ms,
-                    'finish_reason': response['finish_reason'],
-                }
-                
+                return self._stream_response(messages, mode, tokens_in, **gen_kwargs)
+
+            response = self.engine.generate(messages=messages, **gen_kwargs)
+            processed = self._process_response(mode, response["text"])
+            final_text = response["text"] + LEGAL_DISCLAIMER
+            latency_ms = int((time.time() - start) * 1000)
+
+            return {
+                "success": True,
+                "mode": mode,
+                "response": final_text,
+                "processed": processed,
+                "tokens_in": tokens_in,
+                "tokens_out": response.get("tokens_generated", 0),
+                "latency_ms": latency_ms,
+                "finish_reason": response.get("finish_reason", "stop"),
+            }
+
         except Exception as e:
             logger.error(f"Inference error: {e}", exc_info=True)
             return {
-                'success': False,
-                'error': str(e),
-                'mode': mode,
-                'latency_ms': int((time.time() - start_time) * 1000),
+                "success": False,
+                "error": str(e),
+                "mode": mode,
+                "latency_ms": int((time.time() - start) * 1000),
             }
-    
+
     def _stream_response(
         self,
-        prompt: str,
+        messages: List[Dict],
         mode: str,
         tokens_in: int,
-        **kwargs
+        **gen_kwargs,
     ) -> Iterator[Dict[str, Any]]:
-        """Stream response token by token"""
         try:
-            # Send initial metadata
-            yield {
-                'type': 'start',
-                'mode': mode,
-                'tokens_in': tokens_in,
-            }
-            
-            # Stream tokens
-            for token in self.engine.generate_stream(prompt=prompt, **kwargs):
-                yield {
-                    'type': 'token',
-                    'token': token,
-                }
-            
-            # Send completion
-            yield {
-                'type': 'done',
-                'disclaimer': self.processor.LEGAL_DISCLAIMER,
-            }
-            
+            yield {"type": "start", "mode": mode, "tokens_in": tokens_in}
+
+            for token in self.engine.generate_stream(messages=messages, **gen_kwargs):
+                yield {"type": "token", "token": token}
+
+            yield {"type": "done", "disclaimer": LEGAL_DISCLAIMER}
+
         except Exception as e:
             logger.error(f"Streaming error: {e}", exc_info=True)
-            yield {
-                'type': 'error',
-                'error': str(e),
-            }
-    
-    def _process_response(self, mode: str, response_text: str) -> Dict[str, Any]:
-        """Process response based on mode"""
-        if mode == 'A':
-            return self.processor.process_mode_a(response_text)
-        elif mode == 'B':
-            return self.processor.process_mode_b(response_text)
-        elif mode == 'C':
-            return self.processor.process_mode_c(response_text)
-        else:
-            return {'raw_response': response_text}
-    
+            yield {"type": "error", "error": str(e)}
+
+    def _process_response(self, mode: str, text: str) -> Dict:
+        if mode == "A":
+            return self.processor.process_mode_a(text)
+        elif mode == "B":
+            return self.processor.process_mode_b(text)
+        elif mode == "C":
+            return self.processor.process_mode_c(text)
+        return {"raw_response": text}
+
     def health_check(self) -> Dict[str, Any]:
-        """Check if inference engine is ready"""
         return {
-            'model_loaded': self.engine.is_loaded(),
-            'model_path': settings.MODEL_CONFIG.get('model_path'),
+            "model_loaded": self.engine.is_loaded(),
+            "model": self.engine.model,
+            "ollama_url": self.engine.base_url,
         }
 
 
-# Global instance
 inference_service = InferenceService()

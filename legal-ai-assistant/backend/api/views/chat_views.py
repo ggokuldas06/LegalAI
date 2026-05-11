@@ -1,148 +1,128 @@
 # api/views/chat_views.py
+import json
+import logging
+import os
+
+from django.http import StreamingHttpResponse
+from django_ratelimit.decorators import ratelimit
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.http import StreamingHttpResponse
-from django_ratelimit.decorators import ratelimit
-import json
-import logging
 
-from ..serializers import ChatRequestSerializer, ChatLogSerializer
-from ..models import ChatLog, Document, AuditLog
 from ..inference.service import inference_service
+from ..models import AuditLog, ChatLog, Document
+from ..serializers import ChatRequestSerializer
 from ..utils.helpers import get_client_ip, get_user_agent
 
 logger = logging.getLogger(__name__)
 
-# api/views/chat_views.py - Add at the very start of the chat function
 
-@api_view(['POST'])
+def _extract_document_text(document: Document) -> str:
+    """Extract plain text from a document file (PDF, TXT, or MD)."""
+    ext = os.path.splitext(document.path)[1].lower()
+    if ext in (".txt", ".md"):
+        with open(document.path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    elif ext == ".pdf":
+        import PyPDF2
+        text = ""
+        with open(document.path, "rb") as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        return text
+    raise ValueError(f"Unsupported file type: {ext}")
+
+
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
-@ratelimit(key='user', rate='30/h', method='POST')
-def chat(request):
-    """Chat endpoint"""
-    import sys
-    
-    # Log to console immediately
-    print("\n" + "="*80, file=sys.stderr)
-    print(f"CHAT REQUEST RECEIVED", file=sys.stderr)
-    print(f"User: {request.user.username}", file=sys.stderr)
-    print(f"Data: {request.data}", file=sys.stderr)
-    print("="*80 + "\n", file=sys.stderr)
-    
-    logger.info(f"Chat request received from user: {request.user.username}")
-    
-    # Rest of your code...
-    
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@ratelimit(key='user', rate='30/h', method='POST')
+@ratelimit(key="user", rate="60/h", method="POST")
 def chat(request):
     """
-    Chat endpoint - sends message to LLM
     POST /api/v1/chat
-    Body: {
-        "mode": "A"|"B"|"C",
-        "message": "...",
-        "doc_id": 123,  // Required for A/B
-        "filters": {},  // Optional for C
-        "settings": {}, // Optional inference settings
-        "stream": false
-    }
+    Body: { mode, message, doc_id?, filters?, stream? }
+
+    Mode A (Summarizer)     — doc_id required; full text → LLM, no RAG
+    Mode B (Clause Classifier) — doc_id required; full text → LLM, no RAG
+    Mode C (Case-Law IRAC)  — RAG retrieval; doc_id optional (scopes to one doc)
     """
-    # Validate request
     serializer = ChatRequestSerializer(data=request.data)
-    
     if not serializer.is_valid():
-        return Response({
-            'success': False,
-            'error': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
+        return Response({"success": False, "error": serializer.errors},
+                        status=status.HTTP_400_BAD_REQUEST)
+
     data = serializer.validated_data
-    mode = data['mode']
-    message = data['message']
-    doc_id = data.get('doc_id')
-    filters = data.get('filters', {})
-    settings_override = data.get('settings', {})
-    stream = data.get('stream', False)
-    
-    # Get document if needed
+    mode = data["mode"]
+    message = data["message"]
+    doc_id = data.get("doc_id")
+    filters = data.get("filters", {})
+    do_stream = data.get("stream", False)
+
+    # ------------------------------------------------------------------ #
+    # Mode A / B — load full document text; no RAG                        #
+    # ------------------------------------------------------------------ #
     document = None
     document_text = None
     document_title = None
-    
-    if mode in ['A', 'B']:
+
+    if mode in ("A", "B"):
+        if not doc_id:
+            return Response({"success": False, "error": "doc_id is required for this mode"},
+                            status=status.HTTP_400_BAD_REQUEST)
         try:
             document = Document.objects.get(id=doc_id, user=request.user)
-            
-            # Load document text from file
-            with open(document.path, 'r', encoding='utf-8') as f:
-                document_text = f.read()
-            
+            document_text = _extract_document_text(document)
             document_title = document.title
-            
         except Document.DoesNotExist:
-            return Response({
-                'success': False,
-                'error': f'Document {doc_id} not found'
-            }, status=status.HTTP_404_NOT_FOUND)
+            return Response({"success": False, "error": f"Document {doc_id} not found"},
+                            status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            logger.error(f"Error loading document: {e}")
-            return Response({
-                'success': False,
-                'error': 'Failed to load document'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    # Get context passages for mode C (TODO: implement RAG retrieval)
+            logger.error(f"Error loading document {doc_id}: {e}", exc_info=True)
+            return Response({"success": False, "error": "Failed to load document"},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # ------------------------------------------------------------------ #
+    # Mode C — RAG retrieval; optional doc_id scopes to a single doc      #
+    # ------------------------------------------------------------------ #
     context_passages = []
-    if mode == 'C':
-        # Use RAG retrieval for Mode C
+    if mode == "C":
+        # If a specific document was selected, resolve it for the chat log
+        if doc_id:
+            try:
+                document = Document.objects.get(id=doc_id, user=request.user)
+            except Document.DoesNotExist:
+                pass
+
         try:
             from ..rag.retrieval import retrieval_service
-            
             context_passages = retrieval_service.retrieve_for_mode_c(
                 question=message,
-                jurisdiction=filters.get('jurisdiction'),
-                year_from=filters.get('year_from'),
-                year_to=filters.get('year_to'),
-                keywords_include=filters.get('include', []),
-                keywords_exclude=filters.get('exclude', []),
-                k=5  # Top 5 most relevant chunks
+                document_id=doc_id if doc_id else None,
+                jurisdiction=filters.get("jurisdiction"),
+                year_from=filters.get("year_from"),
+                year_to=filters.get("year_to"),
+                keywords_include=filters.get("include", []),
+                keywords_exclude=filters.get("exclude", []),
+                k=8,
             )
-            
-            logger.info(f"Retrieved {len(context_passages)} context passages for Mode C")
-            
+            logger.info(f"Retrieved {len(context_passages)} passages for Mode C"
+                        + (f" (doc {doc_id})" if doc_id else " (global)"))
         except Exception as e:
-            logger.warning(f"RAG retrieval failed, using empty context: {e}")
-            context_passages = []
+            logger.warning(f"RAG retrieval failed: {e}", exc_info=True)
 
-    
-    # Merge user settings with override
-    user_settings = {}
-    try:
-        user_settings = {
-            'temperature': request.user.settings.temperature,
-            'max_tokens': request.user.settings.max_tokens,
-            'top_p': request.user.settings.top_p,
-            'top_k': request.user.settings.top_k,
-        }
-    except:
-        pass
-    
-    user_settings.update(settings_override)
-    
-    # Handle streaming
-    if stream:
-        return handle_streaming_chat(
-            request, mode, message, document, document_text, 
-            document_title, context_passages, filters, user_settings
+    # ------------------------------------------------------------------ #
+    # Dispatch                                                             #
+    # ------------------------------------------------------------------ #
+    if do_stream:
+        return _streaming_response(
+            request, mode, message, document, document_text,
+            document_title, context_passages, filters,
         )
-    
-    # Non-streaming response
+
     try:
-        # Call inference service
         result = inference_service.chat(
             mode=mode,
             message=message,
@@ -150,77 +130,64 @@ def chat(request):
             document_title=document_title,
             context_passages=context_passages,
             filters=filters,
-            settings_override=user_settings,
             stream=False,
         )
-        
-        if not result.get('success'):
-            return Response({
-                'success': False,
-                'error': result.get('error', 'Unknown error')
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # Extract citations from processed response
-        citations = []
-        if result.get('processed'):
-            citations = result['processed'].get('citations', [])
-        
-        # Save to chat log
+
+        if not result.get("success"):
+            return Response({"success": False, "error": result.get("error", "Unknown error")},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        citations = result.get("processed", {}).get("citations", []) if result.get("processed") else []
+
         chat_log = ChatLog.objects.create(
             user=request.user,
             mode=mode,
             prompt=message,
-            response=result['response'],
+            response=result["response"],
             document=document,
             citations=citations,
-            tokens_in=result.get('tokens_in', 0),
-            tokens_out=result.get('tokens_out', 0),
-            latency_ms=result.get('latency_ms', 0),
+            tokens_in=result.get("tokens_in", 0),
+            tokens_out=result.get("tokens_out", 0),
+            latency_ms=result.get("latency_ms", 0),
             filters_used=filters,
         )
-        
-        # Audit log
+
         AuditLog.objects.create(
             user=request.user,
-            action='chat',
+            action="chat",
             ip_address=get_client_ip(request),
             user_agent=get_user_agent(request),
-            meta_json={
-                'mode': mode,
-                'chat_log_id': chat_log.id,
-                'tokens_out': result.get('tokens_out', 0),
-            }
+            meta_json={"mode": mode, "chat_log_id": chat_log.id},
         )
-        
+
         return Response({
-            'success': True,
-            'data': {
-                'chat_log_id': chat_log.id,
-                'mode': mode,
-                'response': result['response'],
-                'processed': result.get('processed'),
-                'citations': citations,
-                'tokens_in': result.get('tokens_in', 0),
-                'tokens_out': result.get('tokens_out', 0),
-                'latency_ms': result.get('latency_ms', 0),
-            }
+            "success": True,
+            "data": {
+                "chat_log_id": chat_log.id,
+                "mode": mode,
+                "response": result["response"],
+                "processed": result.get("processed"),
+                "citations": citations,
+                "tokens_in": result.get("tokens_in", 0),
+                "tokens_out": result.get("tokens_out", 0),
+                "latency_ms": result.get("latency_ms", 0),
+            },
         })
-        
+
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"success": False, "error": str(e)},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def handle_streaming_chat(request, mode, message, document, document_text, 
-                          document_title, context_passages, filters, user_settings):
-    """Handle streaming chat response"""
-    
+def _streaming_response(
+    request, mode, message, document, document_text,
+    document_title, context_passages, filters,
+):
+    """Return a Server-Sent Events streaming response."""
+
     def event_stream():
         try:
-            # Get streaming generator
             stream = inference_service.chat(
                 mode=mode,
                 message=message,
@@ -228,54 +195,47 @@ def handle_streaming_chat(request, mode, message, document, document_text,
                 document_title=document_title,
                 context_passages=context_passages,
                 filters=filters,
-                settings_override=user_settings,
                 stream=True,
             )
-            
-            accumulated_text = ""
+
+            accumulated = ""
             tokens_in = 0
-            
+
             for chunk in stream:
-                if chunk['type'] == 'start':
-                    tokens_in = chunk.get('tokens_in', 0)
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                
-                elif chunk['type'] == 'token':
-                    token = chunk.get('token', '')
-                    accumulated_text += token
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                
-                elif chunk['type'] == 'done':
-                    # Save to chat log
-                    chat_log = ChatLog.objects.create(
-                        user=request.user,
-                        mode=mode,
-                        prompt=message,
-                        response=accumulated_text,
-                        document=document,
-                        citations=[],  # TODO: extract from accumulated_text
-                        tokens_in=tokens_in,
-                        tokens_out=len(accumulated_text.split()),  # Approximate
-                        latency_ms=0,
-                        filters_used=filters,
-                    )
-                    
-                    chunk['chat_log_id'] = chat_log.id
-                    yield f"data: {json.dumps(chunk)}\n\n"
-                
-                elif chunk['type'] == 'error':
-                    yield f"data: {json.dumps(chunk)}\n\n"
-        
+                event_type = chunk.get("type")
+
+                if event_type == "start":
+                    tokens_in = chunk.get("tokens_in", 0)
+
+                elif event_type == "token":
+                    accumulated += chunk.get("token", "")
+
+                elif event_type == "done":
+                    try:
+                        chat_log = ChatLog.objects.create(
+                            user=request.user,
+                            mode=mode,
+                            prompt=message,
+                            response=accumulated,
+                            document=document,
+                            citations=[],
+                            tokens_in=tokens_in,
+                            tokens_out=len(accumulated.split()),
+                            latency_ms=0,
+                            filters_used=filters,
+                        )
+                        chunk["chat_log_id"] = chat_log.id
+                    except Exception as log_err:
+                        logger.warning(f"Could not save chat log: {log_err}")
+
+                yield f"data: {json.dumps(chunk)}\n\n"
+
         except Exception as e:
-            logger.error(f"Streaming error: {e}", exc_info=True)
-            error_chunk = {'type': 'error', 'error': str(e)}
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-    
-    response = StreamingHttpResponse(
-        event_stream(),
-        content_type='text/event-stream'
-    )
-    response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'
-    
+            logger.error(f"SSE streaming error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    response["Access-Control-Allow-Origin"] = "*"
     return response

@@ -127,16 +127,14 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
-# Model settings
+# Model settings — Ollama-backed Gemma 4
 MODEL_CONFIG = {
-    'model_path': os.getenv('MODEL_PATH'),
-    'lora_path': os.getenv('LORA_PATH'),
-    'n_ctx': int(os.getenv('N_CTX', 4096)),
-    'n_threads': int(os.getenv('N_THREADS', 8)),
+    'ollama_url': os.getenv('OLLAMA_URL', 'http://localhost:11434'),
+    'model_name': os.getenv('MODEL_NAME', 'gemma4:latest'),
     'temperature': float(os.getenv('TEMPERATURE', 0.7)),
     'top_p': float(os.getenv('TOP_P', 0.9)),
     'top_k': int(os.getenv('TOP_K', 50)),
-    'max_tokens': int(os.getenv('MAX_TOKENS', 256)),
+    'max_tokens': int(os.getenv('MAX_TOKENS', 2048)),
 }
 
 # Logging

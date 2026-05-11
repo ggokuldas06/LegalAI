@@ -1,0 +1,646 @@
+================================================================================
+          LEGAL AI ASSISTANT — COMPLETE SYSTEM REPORT
+================================================================================
+Project : Legal AI Assistant
+Stack   : Django (backend) + Vue 3 (frontend) + Ollama (LLM) + ChromaDB (RAG)
+Author  : ggokuldas06
+Date    : 2026-05-11
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. SYSTEM ARCHITECTURE — HIGH-LEVEL OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    LEGAL AI ASSISTANT                               │
+  │                                                                     │
+  │  ┌──────────────┐       REST/SSE        ┌──────────────────────┐   │
+  │  │  Vue 3       │ ◄──────────────────►  │  Django 4.2          │   │
+  │  │  Frontend    │                       │  Backend (DRF)       │   │
+  │  │  (port 5173) │                       │  (port 8000)         │   │
+  │  └──────────────┘                       └────────┬─────────────┘   │
+  │                                                  │                  │
+  │                              ┌───────────────────┼───────────────┐ │
+  │                              │                   │               │ │
+  │                     ┌────────▼──────┐  ┌─────────▼──────┐       │ │
+  │                     │  RAG Pipeline │  │  LLM Engine    │       │ │
+  │                     │  (ChromaDB +  │  │  (Ollama API)  │       │ │
+  │                     │   BM25 + RRF) │  │  gemma4:latest │       │ │
+  │                     └───────────────┘  └────────────────┘       │ │
+  │                                                                   │ │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  Data flow for a chat request (Mode C — Case-Law IRAC):
+
+    User query
+      → JWT-authenticated POST /api/v1/chat
+      → RAG retrieval (BM25 + vector + RRF)
+      → Top-k chunks injected into structured prompt
+      → Ollama gemma4:latest (non-streaming inference)
+      → Word-by-word SSE stream to frontend
+      → Rendered Markdown in chat UI
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. RAG PIPELINE — DOCUMENT INGESTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File : backend/api/rag/ingestion.py
+  Class: IngestionService
+
+  Ingestion steps for each document:
+
+    1. Text extraction
+         .txt  → plain read
+         .pdf  → PyPDF2 page-by-page extraction
+
+    2. Hierarchical structure-aware chunking  [see Section 3]
+
+    3. Embedding generation
+         Model : all-MiniLM-L6-v2 (384-dim, local)
+         Batch : 32 texts per call
+
+    4. Persist chunks to Django ORM (SQLite)
+         Table : chunks (document_id, ord, heading, text, embedding_json)
+
+    5. Index into ChromaDB + update BM25 index  [see Section 4]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. SEMANTIC STRUCTURE-AWARE HIERARCHICAL RECURSIVE CHUNKING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File : backend/api/rag/chunker.py
+  Class: HierarchicalChunker
+
+  ── 3.1  Core Idea ──────────────────────────────────────────────────────────
+
+  Instead of blindly slicing text at fixed character counts, the chunker first
+  UNDERSTANDS the document structure (heading hierarchy, tables, paragraphs)
+  and then splits along semantic boundaries.
+
+  ── 3.2  Heading Detection ──────────────────────────────────────────────────
+
+  Level │ Markdown pattern   │ Legal document pattern
+  ──────┼────────────────────┼──────────────────────────────────────────────
+  H1    │ # Heading          │ CHAPTER X, PART X, TITLE X
+  H2    │ ## Heading         │ SECTION X, ARTICLE X, § X, 1. ALL CAPS
+  H3    │ ### Heading        │ 1.1 Clause, 1.1. Sub-clause, a) Item, (i) Item
+
+  Priority: Markdown patterns checked first, legal patterns as fallback.
+  This handles both markdown-formatted documents and raw PDF extractions.
+
+  ── 3.3  Table Detection and Atomic Preservation ────────────────────────────
+
+  Tables are extracted BEFORE structural parsing and kept as atomic chunks:
+
+    Detected by:
+      • Lines matching  ^│.+│$   (pipe-separated rows)
+      • Lines matching  ^[-|+]{3,}$  (ASCII table borders)
+
+    Tables are NEVER split. Each table = one chunk with heading "[Table]".
+    After structural parsing, tables are re-injected into the chunk list.
+
+  ── 3.4  Recursive Splitting Algorithm ──────────────────────────────────────
+
+    parse_structure(document_text)
+      → StructureNode tree (H1 → H2 → H3 → text)
+
+    for each node in tree:
+      if node.full_length() ≤ chunk_size:
+          → emit as single chunk             ← ATOMIC LEAF
+      elif node has H3 children:
+          → recurse into H3 sub-nodes        ← STRUCTURAL SPLIT
+      else:
+          → sentence_split(text, chunk_size) ← SENTENCE FALLBACK
+
+    sentence_split uses NLTK punkt tokenizer with configurable overlap:
+      • Default chunk_size  : 800 characters
+      • Default overlap     : 150 characters
+      • Min chunk size      : 80 characters (below this, chunk is discarded)
+
+  ── 3.5  Chunk Metadata ─────────────────────────────────────────────────────
+
+  Every chunk carries:
+    • text         — raw chunk content
+    • heading      — immediate section heading
+    • section_path — full breadcrumb, e.g. "Contract > Section 2 > 2.1 Payment"
+    • ord          — sequential position within document
+    • node_type    — "text" or "table"
+    • document_id, title, jurisdiction, year, source
+
+  The section_path is stored in ChromaDB and used for citations.
+
+  ── 3.6  Why This Matters ───────────────────────────────────────────────────
+
+  Traditional fixed-size chunkers break mid-sentence or mid-table, losing
+  context. This chunker ensures:
+    • A clause is never split from its section heading
+    • Table cells are never orphaned
+    • Retrieval results carry full provenance for citations
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. VECTOR STORE — CHROMADB (PERSISTENT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File      : backend/api/rag/chroma_store.py
+  Class     : ChromaHybridStore
+  Library   : chromadb >= 0.5.0
+  Storage   : data/chroma_db/  (persistent on disk)
+  Collection: "legal_chunks"
+  Distance  : cosine (hnsw:space = cosine)
+
+  ── 4.1  What Is Stored Per Chunk ───────────────────────────────────────────
+
+    Field         │ Type   │ Description
+    ──────────────┼────────┼────────────────────────────────────────────────
+    id            │ str    │ "chunk_<django_pk>"  (unique)
+    document      │ str    │ Raw chunk text (used by Chroma + BM25)
+    embedding     │ float[]│ 384-dim all-MiniLM-L6-v2 vector
+    document_id   │ int    │ FK to Django Document model
+    title         │ str    │ Document title
+    heading       │ str    │ Immediate section heading
+    section_path  │ str    │ Full breadcrumb path
+    jurisdiction  │ str    │ "US", "UK", "EU", etc.
+    year          │ int    │ Document year
+    source        │ str    │ URL or citation origin
+    node_type     │ str    │ "text" or "table"
+
+  ── 4.2  Chroma Metadata Filter Support ─────────────────────────────────────
+
+    Supported WHERE clause filters:
+      • jurisdiction  → exact match  {"$eq": "US"}
+      • year_from     → range        {"year": {"$gte": 2015}}
+      • year_to       → range        {"year": {"$lte": 2024}}
+
+  ── 4.3  Lifecycle Operations ────────────────────────────────────────────────
+
+    add_chunks(ids, texts, embeddings, metadatas)
+      → writes to Chroma + extends in-memory BM25 index
+
+    delete_by_document(document_id)
+      → removes all chunks for that doc from Chroma
+      → triggers full BM25 index rebuild
+
+    size  → returns collection.count()
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. HYBRID RETRIEVAL — BM25 + VECTOR SEARCH + RECIPROCAL RANK FUSION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File : backend/api/rag/chroma_store.py  →  ChromaHybridStore.search()
+  File : backend/api/rag/retrieval.py     →  RetrievalService.retrieve()
+
+  ── 5.1  BM25 Search ────────────────────────────────────────────────────────
+
+    Library   : rank_bm25 >= 0.2.2  (BM25Okapi variant)
+    Index     : In-memory, built from all chunk texts at startup
+    Tokenizer : Whitespace split, lowercased
+
+    BM25Okapi scoring formula:
+      score(q, d) = Σ IDF(qᵢ) · [f(qᵢ,d)·(k₁+1)] / [f(qᵢ,d) + k₁·(1-b+b·|d|/avgdl)]
+
+      where:
+        f(qᵢ,d) = term frequency of query term qᵢ in document d
+        |d|     = document length
+        avgdl   = average document length in corpus
+        k₁ = 1.5  (term frequency saturation)
+        b  = 0.75 (length normalization)
+
+    BM25 excels at: exact keyword matching, legal jargon, case names, statutes
+
+  ── 5.2  Vector Search ──────────────────────────────────────────────────────
+
+    Embedding model : all-MiniLM-L6-v2  (local, 384-dim)
+    Index type      : HNSW (Hierarchical Navigable Small World graph) via Chroma
+    Similarity      : Cosine similarity on L2-normalized vectors
+    Query flow      : encode(query_text) → 384-dim vector → Chroma.query()
+
+    Vector search excels at: semantic similarity, paraphrasing, concept matching
+
+  ── 5.3  Reciprocal Rank Fusion (RRF) ───────────────────────────────────────
+
+    RRF merges the BM25 ranked list and the vector ranked list into a single
+    fused ranking without requiring score normalization.
+
+    Formula:
+      RRF_score(doc) = Σ  1 / (k + rank(doc, list_i) + 1)
+                      lists
+
+      where k = 60  (smoothing constant, standard value from RRF paper)
+
+    Example (k=60):
+      Rank 1  →  1/(60+1+1) = 0.01613
+      Rank 5  →  1/(60+5+1) = 0.01515
+      Rank 50 →  1/(60+50+1) = 0.00901
+
+    A document ranked #1 in BM25 and #3 in vector gets:
+      score = 1/62 + 1/64 = 0.01613 + 0.01563 = 0.03176
+
+    A document ranked #1 in only BM25 gets:
+      score = 1/62 = 0.01613
+
+    This naturally rewards documents that appear highly in BOTH lists.
+
+    Implementation:
+      _rrf(ranked_lists=[bm25_ids, vector_ids], k=60)
+        → dict: {chunk_id: fused_score}
+        → sorted descending by score
+        → top-k chunk ids fetched from Chroma for full metadata
+
+  ── 5.4  Filter Application ──────────────────────────────────────────────────
+
+    Chroma WHERE filters applied to vector search (pre-retrieval)
+    Keyword include/exclude filters applied post-retrieval (Python)
+    candidate_k = min(k × 4, total_chunks)  — over-fetch for filter headroom
+
+  ── 5.5  Full Retrieval Call ─────────────────────────────────────────────────
+
+    RetrievalService.retrieve(query, k=8, filters)
+      1. encode(query)          → 384-dim query vector
+      2. _vector_search(...)    → ordered list of chunk_ids  (cosine)
+      3. _bm25_search(...)      → ordered list of chunk_ids  (BM25Okapi)
+      4. _rrf([bm25, vector])   → fused ranked list
+      5. fetch top-k from Chroma with full metadata
+      6. return formatted chunk list with score, text, heading, section_path, citations
+
+  ── 5.6  Why Hybrid > Pure Vector ───────────────────────────────────────────
+
+    Pure vector search misses exact case citations: "Donoghue v Stevenson"
+    Pure BM25 misses semantic matches: "duty of care" ≠ "responsibility to consumers"
+    Hybrid + RRF captures both — documented 10-20% NDCG improvement in literature
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. EMBEDDING MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File      : backend/api/rag/embeddings.py
+  Class     : EmbeddingService  (singleton)
+  Model     : all-MiniLM-L6-v2
+  Library   : sentence-transformers >= 2.2.2
+  Local path: backend/api/rag/local_models/all-MiniLM-L6-v2/
+  Dimensions: 384
+  Inference : CPU (Apple Silicon MPS not required)
+
+  encode(texts, batch_size=32) → np.ndarray shape (n, 384)
+  encode_single(text)          → np.ndarray shape (384,)
+
+  The model is loaded once as a singleton at startup to avoid reload overhead.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. LANGUAGE MODEL — GEMMA 4 VIA OLLAMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File    : backend/api/inference/llm_engine.py
+  Class   : OllamaLLMEngine  (singleton)
+  Model   : gemma4:latest  (ID: c6eb396dbd59)
+  Size    : 9.6 GB (4-bit quantized, Q4 equivalent)
+  Server  : Ollama 0.23.2  at  http://localhost:11434
+  Endpoint: POST /api/chat  (messages format: system + user roles)
+
+  ── 7.1  Generation Parameters ──────────────────────────────────────────────
+
+    Parameter    │ Default │ Description
+    ─────────────┼─────────┼──────────────────────────────────────────────
+    temperature  │ 0.7     │ Sampling randomness (0=deterministic, 2=wild)
+    top_p        │ 0.9     │ Nucleus sampling threshold
+    top_k        │ 50      │ Top-k token candidates per step
+    num_predict  │ 2048+   │ Max tokens to generate (see note below)
+
+  ── 7.2  Gemma 4 Thinking Tokens — Important Quirk ─────────────────────────
+
+    Gemma 4 uses an internal chain-of-thought mechanism. On longer legal
+    prompts, it generates "thinking" tokens internally before producing the
+    visible response. These thinking tokens count toward num_predict.
+
+    Bug observed in Ollama 0.23.2: when num_predict < 1024 on prompts > 200
+    tokens, all generation budget is consumed by internal reasoning and the
+    content field returns empty ("").
+
+    Fix applied: enforce  num_predict = max(requested, 2048)
+    This guarantees enough budget for both reasoning AND the visible response.
+
+  ── 7.3  Streaming Strategy ─────────────────────────────────────────────────
+
+    Ollama 0.23.2 streaming via /api/chat does not emit content tokens for
+    gemma4 when a system message is present (known upstream bug).
+
+    Workaround: "Simulated streaming"
+      1. Full non-streaming inference → complete response text
+      2. Split text by whitespace with re.split(r'(\s+)', text)
+      3. Yield each word/token via Django StreamingHttpResponse (SSE)
+      4. Frontend receives real-time token events and appends to message
+
+    This gives the user a genuine typewriter experience without actually
+    streaming from the model. Latency = full inference time, then instant
+    word delivery.
+
+  ── 7.4  API Endpoint Used ──────────────────────────────────────────────────
+
+    POST http://localhost:11434/api/chat
+    Body: {
+      "model": "gemma4:latest",
+      "messages": [
+        {"role": "system", "content": "..."},
+        {"role": "user", "content": "..."}
+      ],
+      "stream": false,
+      "options": {
+        "num_predict": 2048,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 50
+      }
+    }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. INFERENCE MODES & PROMPT ENGINEERING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  File : backend/api/inference/prompts.py
+
+  ── Mode A — Document Summarizer ────────────────────────────────────────────
+
+    Input : uploaded document text + title
+    Prompt: system instructs IRAC-style Markdown summary with 4 sections:
+              ## Executive Summary  (2-3 bullets)
+              ## Key Points         (4-6 bullets)
+              ## Risks              (identified legal risks)
+              ## Obligations        (key obligations and deadlines)
+    Rule  : every bullet MUST include citation [Section X, paragraph Y]
+    Output: raw Markdown
+
+  ── Mode B — Clause Detection & Classification ──────────────────────────────
+
+    Input : contract text + title
+    Clause types searched (10 default):
+      Termination, Indemnity, Confidentiality, Intellectual Property,
+      Liability Caps, Governing Law, Payment Terms, Warranties,
+      Force Majeure, Assignment
+    Output format per clause:
+      **Clause Type:** <type>
+      **Citation:** <nearest section header>
+      **Confidence:** high | medium | low
+      **Excerpt:** <verbatim text>
+
+  ── Mode C — Case-Law IRAC Q&A (RAG-powered) ────────────────────────────────
+
+    Input : user question + top-k retrieved chunks from hybrid search
+    Format: IRAC (Issue / Rule / Application / Conclusion)
+    Citation rule: every claim must be cited as [Case Name, Year] or [Source N]
+    Fallback: "Insufficient basis from provided sources" if context is empty
+    Output: structured Markdown with IRAC headings
+
+  ── Post-Processing ─────────────────────────────────────────────────────────
+
+    File  : backend/api/inference/post_processor.py
+    Class : ResponseProcessor
+
+    • Extracts all [citation] references via regex
+    • Parses IRAC sections (Issue/Rule/Application/Conclusion) from Markdown
+    • Computes citation coverage = sentences_with_citations / total_sentences
+    • Appends legal disclaimer to all responses
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9. DJANGO BACKEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Framework  : Django 4.2.7
+  API layer  : Django REST Framework 3.14
+  Auth       : JWT via djangorestframework-simplejwt 5.3
+               Access token  : 1 hour TTL
+               Refresh token : 7 days TTL, rotated on use
+  Rate limit : django-ratelimit  60 requests/hour per user
+  CORS       : django-cors-headers, allowed: http://localhost:5173
+  Cache/Queue: Redis (localhost:6379)
+  Database   : SQLite  (data/db.sqlite3)
+
+  ── Django Models ────────────────────────────────────────────────────────────
+
+    Model        │ Table         │ Key fields
+    ─────────────┼───────────────┼──────────────────────────────────────────
+    User         │ auth_user     │ Django built-in
+    UserSettings │ user_settings │ temperature, max_tokens, top_p, top_k
+    OrgProfile   │ org_profile   │ jurisdictions, clause_set
+    Document     │ documents     │ title, doctype, jurisdiction, date, path, sha256
+    Chunk        │ chunks        │ document, ord, heading, text, embedding_json
+    ChatLog      │ chat_log      │ user, mode, prompt, response, citations, latency_ms
+    AuditLog     │ audit         │ user, action, ip_address, meta_json
+
+  ── API Endpoints ────────────────────────────────────────────────────────────
+
+    Auth
+      POST /api/v1/auth/register        Register new user
+      POST /api/v1/auth/login           Login → JWT tokens
+      POST /api/v1/auth/logout          Invalidate refresh token
+      GET  /api/v1/auth/profile         User profile + settings
+      PUT  /api/v1/auth/settings        Update inference settings
+
+    Chat
+      POST /api/v1/chat                 Chat request (stream=true for SSE)
+
+    Documents
+      GET  /api/v1/documents            List user's documents
+      POST /api/v1/documents/upload     Upload PDF or TXT
+      GET  /api/v1/documents/:id        Document detail
+      DEL  /api/v1/documents/:id/delete Delete document
+      GET  /api/v1/documents/:id/content  Raw document text
+
+    RAG
+      POST /api/v1/ingest               Ingest document into ChromaDB
+      POST /api/v1/ingest/batch         Batch ingest multiple documents
+      POST /api/v1/search               Hybrid search (BM25 + vector + RRF)
+      GET  /api/v1/rag/stats            Vector store statistics
+
+    History
+      GET  /api/v1/history              List chat history
+      GET  /api/v1/history/:id          Single chat log detail
+      DEL  /api/v1/history/:id/delete   Delete chat log
+      POST /api/v1/history/export       Export history
+
+    Health
+      GET  /api/v1/health/check         System health (model, DB, vector store)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+10. VUE 3 FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Framework  : Vue 3 (Composition API) + Vite
+  State      : Pinia stores (auth, chat, documents, history)
+  Routing    : Vue Router 4
+  UI kit     : Bootstrap 5 + Bootstrap Icons
+  HTTP       : Axios (API calls) + native fetch (SSE streaming)
+
+  ── Views ────────────────────────────────────────────────────────────────────
+
+    LoginView      → JWT login form
+    RegisterView   → User registration
+    ChatView       → Main chat interface (sidebar + message area)
+    DocumentsView  → Upload and manage legal documents
+    HistoryView    → Browse and search past conversations
+    SettingsView   → Inference settings (temperature, tokens, etc.)
+
+  ── Chat Streaming (SSE) ─────────────────────────────────────────────────────
+
+    chatAPI.sendMessageStream(payload, { onToken, onDone, onError })
+      → fetch POST /api/v1/chat  (stream: true)
+      → ReadableStream reader
+      → line-by-line SSE parsing: "data: {json}\n\n"
+      → onToken(token)  called per word chunk
+      → onDone(chunk)   called on {type: "done"}
+      → onError(msg)    called on {type: "error"}
+
+    Chat store (Pinia):
+      • Appends placeholder assistant message immediately
+      • Accumulates tokens in message.content in real time
+      • Sets message.streaming = false on done
+      • Auto-scrolls chat area on every token
+
+  ── ChatMessage.vue — Inline Markdown Renderer ──────────────────────────────
+
+    Renders headings (h1–h4), bold, italic, unordered/ordered lists,
+    inline code, blockquotes, horizontal rules, and citation references.
+
+    Citation refs like [Case Name, Year] or [Section X] are styled as
+    highlighted <cite> badges (blue background) for visual clarity.
+
+    Streaming state shows animated bouncing dots (CSS keyframe animation).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+11. SECURITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  • JWT access tokens (1h TTL) + rotating refresh tokens (7d TTL)
+  • Rate limiting: 60 chat requests per user per hour (Redis-backed)
+  • SHA-256 document deduplication (prevents storing duplicate files)
+  • Audit log for all uploads, ingestions, chat requests
+  • CORS restricted to http://localhost:5173
+  • All document access scoped to owning user (Document.objects.get(user=request.user))
+  • Passwords validated by Django's built-in validators
+  • Legal disclaimer appended to every response
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+12. DIRECTORY STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  legal-ai-assistant/
+  ├── backend/
+  │   ├── api/
+  │   │   ├── rag/
+  │   │   │   ├── chunker.py          ← Hierarchical recursive chunker
+  │   │   │   ├── chroma_store.py     ← ChromaDB + BM25 hybrid store
+  │   │   │   ├── vector_store.py     ← Thin redirect to chroma_store
+  │   │   │   ├── embeddings.py       ← all-MiniLM-L6-v2 singleton
+  │   │   │   ├── ingestion.py        ← Document ingestion pipeline
+  │   │   │   ├── retrieval.py        ← RetrievalService (hybrid + RRF)
+  │   │   │   └── local_models/
+  │   │   │       └── all-MiniLM-L6-v2/  ← Local embedding model weights
+  │   │   ├── inference/
+  │   │   │   ├── llm_engine.py       ← OllamaLLMEngine (gemma4:latest)
+  │   │   │   ├── prompts.py          ← Mode A/B/C prompt builders
+  │   │   │   ├── service.py          ← InferenceService (streaming + sync)
+  │   │   │   └── post_processor.py   ← Citation extraction, IRAC parsing
+  │   │   ├── views/
+  │   │   │   ├── chat_views.py       ← /api/v1/chat  (SSE streaming)
+  │   │   │   ├── document_views.py   ← Upload, list, delete documents
+  │   │   │   ├── rag_views.py        ← Ingest, search, stats
+  │   │   │   ├── auth_views.py       ← Register, login, logout, profile
+  │   │   │   └── history_views.py    ← Chat log CRUD
+  │   │   ├── models.py               ← Django ORM models
+  │   │   ├── serializers.py          ← DRF serializers
+  │   │   └── tasks.py                ← Celery async tasks
+  │   ├── config/
+  │   │   └── settings.py             ← Django settings + MODEL_CONFIG
+  │   └── requirements.txt
+  ├── frontend/
+  │   └── src/
+  │       ├── views/                  ← Chat, Documents, History, Settings
+  │       ├── components/
+  │       │   ├── chat/               ← ChatMessage, ChatInput, ModeSelector
+  │       │   └── common/             ← NavBar, Alerts, Spinner
+  │       ├── stores/                 ← Pinia: auth, chat, documents, history
+  │       └── services/
+  │           └── api.js              ← Axios + fetch streaming client
+  └── data/
+      ├── db.sqlite3                  ← Django database
+      ├── chroma_db/                  ← ChromaDB persistent storage
+      └── documents/                  ← Uploaded document files
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+13. PYTHON DEPENDENCIES (KEY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Package                    Version   Purpose
+  ─────────────────────────────────────────────────────────────────────────────
+  Django                     4.2.7     Web framework
+  djangorestframework        3.14.0    REST API layer
+  djangorestframework-simplejwt 5.3.0  JWT authentication
+  django-cors-headers        4.3.0     CORS handling
+  django-ratelimit           4.1.0     Per-user rate limiting
+  chromadb                   >= 0.5.0  Persistent vector database
+  rank_bm25                  >= 0.2.2  BM25Okapi sparse retrieval
+  sentence-transformers      >= 2.2.2  all-MiniLM-L6-v2 embeddings
+  httpx                      >= 0.27.0 Ollama HTTP client (async-capable)
+  PyPDF2                     3.0.1     PDF text extraction
+  nltk                       >= 3.8.1  Sentence tokenizer (punkt)
+  numpy                      >= 1.26.2 Array operations
+  torch                      >= 2.1.0  PyTorch (for sentence-transformers)
+  celery                     5.3.4     Async task queue
+  redis                      5.0.1     Cache + Celery broker
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+14. HOW TO RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Terminal 1 — Ollama (model server, if not already running)
+    ollama serve
+
+  Terminal 2 — Django backend
+    cd backend
+    source venv/bin/activate
+    python manage.py migrate          # first time only
+    python manage.py runserver 8000
+
+  Terminal 3 — Vue frontend
+    cd frontend
+    npm run dev                       # serves at http://localhost:5173
+
+  First-time setup
+    python manage.py createsuperuser  # create admin user
+
+  Ingest a document (after uploading via UI)
+    POST /api/v1/ingest  {"document_id": <id>}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+15. PRODUCTION READINESS ASSESSMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Component                  Status   Notes
+  ─────────────────────────────────────────────────────────────────────────────
+  Hierarchical chunker       ✅ PROD  Structure-aware, table-safe, overlap
+  BM25 + Vector + RRF        ✅ PROD  Standard production retrieval pattern
+  ChromaDB persistent        ⚠️  MVP  Single node; use Qdrant for multi-node
+  Embedding model            ⚠️  MVP  General-purpose; legal-bert would be better
+  LLM (gemma4 via Ollama)    ⚠️  MVP  Single-user; vLLM for concurrent load
+  Streaming (SSE)            ✅ PROD  Simulated but functionally correct
+  JWT auth + rate limiting   ✅ PROD  Solid for internal/single-org use
+  Database (SQLite)          ❌ DEV   Switch to PostgreSQL for any real load
+  Error monitoring           ❌ DEV   No Sentry / alerting configured
+  Citation system            ✅ PROD  Full provenance per chunk
+
+================================================================================
+END OF REPORT
+================================================================================

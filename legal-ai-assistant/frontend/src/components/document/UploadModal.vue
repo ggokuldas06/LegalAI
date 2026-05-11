@@ -27,7 +27,7 @@
                 ref="fileInput"
                 type="file"
                 class="form-control"
-                accept=".pdf,.txt"
+                accept=".pdf,.txt,.md"
                 @change="handleFileSelect"
                 required
               >
@@ -186,9 +186,10 @@ const handleFileSelect = (event) => {
     }
     
     // Validate file type
-    const validTypes = ['application/pdf', 'text/plain']
-    if (!validTypes.includes(file.type)) {
-      error.value = 'Only PDF and TXT files are supported'
+    const validTypes = ['application/pdf', 'text/plain', 'text/markdown', 'text/x-markdown', '']
+    const ext = file.name.split('.').pop().toLowerCase()
+    if (!validTypes.includes(file.type) && ext !== 'md') {
+      error.value = 'Only PDF, TXT, and MD files are supported'
       fileInput.value.value = ''
       return
     }

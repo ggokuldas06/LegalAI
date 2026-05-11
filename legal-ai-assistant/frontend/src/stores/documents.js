@@ -90,7 +90,13 @@ export const useDocumentStore = defineStore('documents', {
     async ingestDocument(id, reindex = false) {
       try {
         const response = await ragAPI.ingest(id, reindex)
-        return { success: true, data: response.data.data }
+        const data = response.data.data
+        // Update chunk_count in local list so UI reflects indexing immediately
+        const doc = this.documents.find((d) => d.id === id)
+        if (doc && data.chunks_created != null) {
+          doc.chunk_count = data.chunks_created
+        }
+        return { success: true, data }
       } catch (error) {
         console.error('Ingest document error:', error)
         return {

@@ -5,9 +5,10 @@ import { chatAPI } from '@/services/api'
 export const useChatStore = defineStore('chat', {
   state: () => ({
     messages: [],
-    currentMode: 'A', // A, B, or C
+    currentMode: 'A',
     selectedDocument: null,
     isLoading: false,
+    isStreaming: false,
     error: null,
     filters: {
       jurisdiction: '',
@@ -20,11 +21,7 @@ export const useChatStore = defineStore('chat', {
 
   getters: {
     modeLabel: (state) => {
-      const labels = {
-        A: 'Summarizer',
-        B: 'Clause Classifier',
-        C: 'Case-Law IRAC',
-      }
+      const labels = { A: 'Summarizer', B: 'Clause Classifier', C: 'Case-Law IRAC' }
       return labels[state.currentMode] || 'Unknown'
     },
   },
@@ -46,66 +43,71 @@ export const useChatStore = defineStore('chat', {
 
     async sendMessage(message, settings = {}) {
       this.isLoading = true
+      this.isStreaming = false
       this.error = null
 
-      // Add user message
       this.messages.push({
         role: 'user',
         content: message,
         timestamp: new Date(),
       })
 
-      try {
-        const payload = {
-          mode: this.currentMode,
-          message,
-          settings,
-        }
+      const payload = {
+        mode: this.currentMode,
+        message,
+        stream: true,
+      }
 
-        // Add document for modes A and B
-        if (this.currentMode === 'A' || this.currentMode === 'B') {
-          if (!this.selectedDocument) {
-            throw new Error('Please select a document first')
-          }
+      if (this.currentMode === 'A' || this.currentMode === 'B') {
+        if (!this.selectedDocument) throw new Error('Please select a document first')
+        payload.doc_id = this.selectedDocument.id
+      }
+
+      if (this.currentMode === 'C') {
+        payload.filters = this.filters
+        // Optional: scope retrieval to a specific document
+        if (this.selectedDocument) {
           payload.doc_id = this.selectedDocument.id
         }
+      }
 
-        // Add filters for mode C
-        if (this.currentMode === 'C') {
-          payload.filters = this.filters
-        }
+      // Add placeholder assistant message for streaming
+      const assistantMsgIndex = this.messages.length
+      this.messages.push({
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        timestamp: new Date(),
+      })
 
-        const response = await chatAPI.sendMessage(payload)
-        const data = response.data.data
-
-        // Add assistant message
-        this.messages.push({
-          role: 'assistant',
-          content: data.response,
-          processed: data.processed,
-          citations: data.citations,
-          tokens_in: data.tokens_in,
-          tokens_out: data.tokens_out,
-          latency_ms: data.latency_ms,
-          chat_log_id: data.chat_log_id,
-          timestamp: new Date(),
+      try {
+        await chatAPI.sendMessageStream(payload, {
+          onToken: (token) => {
+            this.isStreaming = true
+            this.messages[assistantMsgIndex].content += token
+          },
+          onDone: (doneChunk) => {
+            this.messages[assistantMsgIndex].streaming = false
+            this.messages[assistantMsgIndex].chat_log_id = doneChunk.chat_log_id
+            if (doneChunk.disclaimer) {
+              this.messages[assistantMsgIndex].content += doneChunk.disclaimer
+            }
+          },
+          onError: (err) => {
+            this.messages[assistantMsgIndex].role = 'error'
+            this.messages[assistantMsgIndex].content = err
+            this.messages[assistantMsgIndex].streaming = false
+            this.error = err
+          },
         })
-
-        return { success: true, data }
       } catch (error) {
-        console.error('Send message error:', error)
-        this.error = error.response?.data?.error || error.message
-
-        // Add error message
-        this.messages.push({
-          role: 'error',
-          content: this.error,
-          timestamp: new Date(),
-        })
-
-        return { success: false, error: this.error }
+        this.error = error.message
+        this.messages[assistantMsgIndex].role = 'error'
+        this.messages[assistantMsgIndex].content = error.message
+        this.messages[assistantMsgIndex].streaming = false
       } finally {
         this.isLoading = false
+        this.isStreaming = false
       }
     },
 

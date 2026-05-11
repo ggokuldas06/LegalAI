@@ -110,10 +110,10 @@ def document_upload(request):
     
     # Validate file type
     file_ext = os.path.splitext(file_obj.name)[1].lower()
-    if file_ext not in ['.pdf', '.txt']:
+    if file_ext not in ['.pdf', '.txt', '.md']:
         return Response({
             'success': False,
-            'error': 'Only PDF and TXT files are supported'
+            'error': 'Only PDF, TXT, and MD files are supported'
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
@@ -267,10 +267,10 @@ def document_content(request, doc_id):
         # Read file content
         file_ext = os.path.splitext(document.path)[1].lower()
         
-        if file_ext == '.txt':
+        if file_ext in ('.txt', '.md'):
             with open(document.path, 'r', encoding='utf-8') as f:
                 content = f.read()
-        
+
         elif file_ext == '.pdf':
             content = ""
             with open(document.path, 'rb') as pdf_file:

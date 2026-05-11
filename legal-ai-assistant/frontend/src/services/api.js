@@ -3,172 +3,164 @@ import axios from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
 
-// Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 })
 
-// Request interceptor to add auth token
+// Attach auth token on every request
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`
     return config
   },
-  (error) => {
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error),
 )
 
-// Response interceptor to handle token refresh
+// Auto-refresh token on 401
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config
-
-    // If 401 and haven't retried yet, try to refresh token
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true
-
+    const original = error.config
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true
       try {
-        const refreshToken = localStorage.getItem('refresh_token')
-        if (refreshToken) {
-          const response = await axios.post(
-            `${API_BASE_URL}/auth/token/refresh`,
-            { refresh: refreshToken }
-          )
-
-          const { access } = response.data
-          localStorage.setItem('access_token', access)
-
-          // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${access}`
-          return api(originalRequest)
+        const refresh = localStorage.getItem('refresh_token')
+        if (refresh) {
+          const res = await axios.post(`${API_BASE_URL}/auth/token/refresh`, { refresh })
+          localStorage.setItem('access_token', res.data.access)
+          original.headers.Authorization = `Bearer ${res.data.access}`
+          return api(original)
         }
-      } catch (refreshError) {
-        // Refresh failed, logout user
+      } catch {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         window.location.href = '/login'
-        return Promise.reject(refreshError)
       }
     }
-
     return Promise.reject(error)
-  }
+  },
 )
 
 // Auth API
 export const authAPI = {
-  register(username, email, password) {
-    return api.post('/auth/register', { username, email, password })
-  },
-  
-  login(username, password) {
-    return api.post('/auth/login', { username, password })
-  },
-  
-  logout(refreshToken) {
-    return api.post('/auth/logout', { refresh: refreshToken })
-  },
-  
-  getProfile() {
-    return api.get('/auth/profile')
-  },
-  
-  updateSettings(settings) {
-    return api.put('/auth/settings', settings)
-  },
-  
-  updateOrgProfile(profile) {
-    return api.put('/auth/org-profile', profile)
-  },
+  register: (username, email, password) =>
+    api.post('/auth/register', { username, email, password }),
+  login: (username, password) =>
+    api.post('/auth/login', { username, password }),
+  logout: (refreshToken) =>
+    api.post('/auth/logout', { refresh: refreshToken }),
+  getProfile: () => api.get('/auth/profile'),
+  updateSettings: (settings) => api.put('/auth/settings', settings),
+  updateOrgProfile: (profile) => api.put('/auth/org-profile', profile),
 }
 
 // Chat API
 export const chatAPI = {
+  /** Non-streaming fallback */
   sendMessage(data) {
-    console.log('Sending chat request:', data)
-    return api.post('/chat', data).then(response => {
-      console.log('Chat response received:', response)
-      return response
-    }).catch(error => {
-      console.error('Chat request failed:', error)
-      throw error
-    })
+    return api.post('/chat', { ...data, stream: false })
+  },
+
+  /**
+   * Streaming chat via Server-Sent Events.
+   * @param {Object} payload  - request body (mode, message, …)
+   * @param {Object} handlers - { onToken, onDone, onError }
+   */
+  async sendMessageStream(payload, { onToken, onDone, onError } = {}) {
+    const token = localStorage.getItem('access_token')
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+
+    let response
+    try {
+      response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...payload, stream: true }),
+      })
+    } catch (err) {
+      onError?.(err.message || 'Network error')
+      return
+    }
+
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`
+      try {
+        const body = await response.json()
+        msg = body.error || msg
+      } catch { /* ignore */ }
+      onError?.(msg)
+      return
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // keep incomplete last line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const json = line.slice(6).trim()
+        if (!json) continue
+
+        try {
+          const chunk = JSON.parse(json)
+          if (chunk.type === 'token') {
+            onToken?.(chunk.token || '')
+          } else if (chunk.type === 'done') {
+            onDone?.(chunk)
+          } else if (chunk.type === 'error') {
+            onError?.(chunk.error || 'Unknown streaming error')
+          }
+        } catch { /* skip malformed line */ }
+      }
+    }
   },
 }
 
 // Document API
 export const documentAPI = {
-  list(params) {
-    return api.get('/documents', { params })
-  },
-  
-  get(id) {
-    return api.get(`/documents/${id}`)
-  },
-  
-  upload(formData) {
-    return api.post('/documents/upload', formData, {
+  list: (params) => api.get('/documents', { params }),
+  get: (id) => api.get(`/documents/${id}`),
+  upload: (formData) =>
+    api.post('/documents/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-    })
-  },
-  
-  delete(id) {
-    return api.delete(`/documents/${id}/delete`)
-  },
-  
-  getContent(id) {
-    return api.get(`/documents/${id}/content`)
-  },
+    }),
+  delete: (id) => api.delete(`/documents/${id}/delete`),
+  getContent: (id) => api.get(`/documents/${id}/content`),
 }
 
 // History API
 export const historyAPI = {
-  list(params) {
-    return api.get('/history', { params })
-  },
-  
-  get(id) {
-    return api.get(`/history/${id}`)
-  },
-  
-  delete(id) {
-    return api.delete(`/history/${id}/delete`)
-  },
-  
-  export(filters) {
-    return api.post('/history/export', filters)
-  },
+  list: (params) => api.get('/history', { params }),
+  get: (id) => api.get(`/history/${id}`),
+  delete: (id) => api.delete(`/history/${id}/delete`),
+  export: (filters) => api.post('/history/export', filters),
 }
 
 // RAG API
 export const ragAPI = {
-  ingest(documentId, reindex = false) {
-    return api.post('/ingest', { document_id: documentId, reindex })
-  },
-  
-  search(query, k = 10, filters = {}) {
-    return api.post('/search', { query, k, filters })
-  },
-  
-  stats() {
-    return api.get('/rag/stats')
-  },
+  ingest: (documentId, reindex = false) =>
+    api.post('/ingest', { document_id: documentId, reindex }),
+  search: (query, k = 10, filters = {}) =>
+    api.post('/search', { query, k, filters }),
+  stats: () => api.get('/rag/stats'),
 }
 
 // Health API
 export const healthAPI = {
-  check() {
-    return api.get('/health/check')
-  },
+  check: () => api.get('/health/check'),
 }
-
 
 export default api

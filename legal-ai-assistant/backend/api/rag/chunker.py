@@ -1,215 +1,358 @@
 # api/rag/chunker.py
 import re
 import nltk
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
 
+# Heading level constants
+H1, H2, H3 = 1, 2, 3
+TABLE = "table"
+TEXT = "text"
 
-class DocumentChunker:
-    """Chunk documents into semantically meaningful segments"""
-    
+
+class StructureNode:
+    """Represents a structural unit in a document"""
+    def __init__(self, level, heading: str, text: str, node_type=TEXT):
+        self.level = level        # H1, H2, H3, or None for text/table
+        self.heading = heading
+        self.text = text          # Raw text content (not including sub-nodes)
+        self.node_type = node_type  # TEXT or TABLE
+        self.children: List["StructureNode"] = []
+
+    def full_text(self) -> str:
+        """Full text including all children"""
+        parts = []
+        if self.heading:
+            parts.append(self.heading)
+        if self.text:
+            parts.append(self.text)
+        for child in self.children:
+            parts.append(child.full_text())
+        return "\n\n".join(p for p in parts if p.strip())
+
+    def full_length(self) -> int:
+        return len(self.full_text())
+
+
+class HierarchicalChunker:
+    """
+    Structure-aware hierarchical recursive chunker.
+
+    Parsing order: H2 sections → if too large, split by H3 → if still too large, split by paragraphs/sentences.
+    Tables are always kept as atomic chunks.
+    """
+
+    # Markdown headings
+    _MD_H1 = re.compile(r'^# (.+)$', re.MULTILINE)
+    _MD_H2 = re.compile(r'^## (.+)$', re.MULTILINE)
+    _MD_H3 = re.compile(r'^### (.+)$', re.MULTILINE)
+
+    # Legal document section patterns (legal docs often use ALL CAPS or numbered headings)
+    _LEGAL_H1 = re.compile(
+        r'^(CHAPTER|PART|TITLE)\s+[IVXLCDM\d]+[.:]?\s*.+$', re.MULTILINE | re.IGNORECASE
+    )
+    _LEGAL_H2 = re.compile(
+        r'^(SECTION|ARTICLE|§)\s+[IVXLCDM\d]+[.:]?\s*.+$|'
+        r'^\d+\.\s{1,4}[A-Z][A-Z\s]{3,}$',
+        re.MULTILINE
+    )
+    _LEGAL_H3 = re.compile(
+        r'^\d+\.\d+\.?\s+.+$|'        # 1.1 or 1.1. heading
+        r'^[a-z]\)\s+[A-Z].+$|'       # a) Heading
+        r'^\([ivxlcdm]+\)\s+[A-Z].+$',  # (i) Heading
+        re.MULTILINE
+    )
+
+    # Table detection: lines of pipe-separated cells or dashed borders
+    _TABLE_ROW = re.compile(r'^\|.+\|$', re.MULTILINE)
+    _TABLE_BORDER = re.compile(r'^[-|+]{3,}$', re.MULTILINE)
+
     def __init__(
         self,
-        chunk_size: int = 500,
-        chunk_overlap: int = 100,
-        min_chunk_size: int = 50
+        chunk_size: int = 800,
+        chunk_overlap: int = 150,
+        min_chunk_size: int = 80,
     ):
-        """
-        Args:
-            chunk_size: Target size for chunks (in characters)
-            chunk_overlap: Overlap between consecutive chunks
-            min_chunk_size: Minimum chunk size to keep
-        """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.min_chunk_size = min_chunk_size
-    
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def chunk_text(
         self,
         text: str,
         document_title: str = "",
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
     ) -> List[Dict]:
         """
-        Chunk text into overlapping segments
-        
-        Args:
-            text: Text to chunk
-            document_title: Document title for context
-            metadata: Additional metadata to include
-        
-        Returns:
-            List of chunk dictionaries with text and metadata
+        Chunk text using structure-aware hierarchical splitting.
+        Returns list of chunk dicts with text, heading, section_path, metadata.
         """
-        # Clean text
-        text = self._clean_text(text)
-        
-        # Try to split by sections first
-        sections = self._split_by_sections(text)
-        
-        chunks = []
-        char_position = 0
-        
-        for section_idx, section in enumerate(sections):
-            section_heading = section.get('heading', '')
-            section_text = section.get('text', '')
-            
-            # If section is small enough, keep as single chunk
-            if len(section_text) <= self.chunk_size:
-                chunks.append({
-                    'ord': len(chunks),
-                    'text': section_text,
-                    'heading': section_heading,
-                    'char_start': char_position,
-                    'char_end': char_position + len(section_text),
-                    'metadata': metadata or {}
-                })
-                char_position += len(section_text)
-            else:
-                # Split large sections into smaller chunks
-                sub_chunks = self._split_text(
-                    section_text,
-                    char_position,
-                    section_heading
-                )
-                for chunk in sub_chunks:
-                    chunk['ord'] = len(chunks)
-                    chunk['metadata'] = metadata or {}
-                    chunks.append(chunk)
-                    char_position = chunk['char_end']
-        
-        logger.info(f"Created {len(chunks)} chunks from document")
-        return chunks
-    
-    def _clean_text(self, text: str) -> str:
-        """Clean and normalize text"""
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        # Remove page numbers and common artifacts
-        text = re.sub(r'\n\s*\d+\s*\n', '\n', text)
-        return text.strip()
-    
-    def _split_by_sections(self, text: str) -> List[Dict]:
-        """
-        Split text by sections (using headers)
-        """
-        # Common section patterns in legal documents
-        section_patterns = [
-            r'\n\s*(?:SECTION|Section|Article|ARTICLE)\s+[IVX\d]+[.:\s]',
-            r'\n\s*[IVX\d]+\.\s+[A-Z][A-Z\s]{3,}',
-            r'\n\s*\d+\.\s+[A-Z][A-Z\s]{3,}',
-        ]
-        
-        sections = []
-        current_heading = ""
-        current_text = ""
-        
-        lines = text.split('\n')
-        
-        for line in lines:
-            # Check if line is a section header
-            is_header = False
-            for pattern in section_patterns:
-                if re.match(pattern, '\n' + line):
-                    # Save previous section
-                    if current_text.strip():
-                        sections.append({
-                            'heading': current_heading.strip(),
-                            'text': current_text.strip()
-                        })
-                    
-                    current_heading = line.strip()
-                    current_text = ""
-                    is_header = True
-                    break
-            
-            if not is_header:
-                current_text += line + "\n"
-        
-        # Add final section
-        if current_text.strip():
-            sections.append({
-                'heading': current_heading.strip(),
-                'text': current_text.strip()
+        metadata = metadata or {}
+        text = self._normalize(text)
+
+        # Extract tables before structural parsing (they're atomic)
+        text, tables = self._extract_tables(text)
+
+        # Parse into structural tree
+        nodes = self._parse_structure(text)
+
+        # Flatten nodes into chunks recursively
+        raw_chunks: List[Dict] = []
+        for node in nodes:
+            self._flatten_node(node, raw_chunks, parent_path=[])
+
+        # Re-inject table chunks at their approximate positions
+        for tbl in tables:
+            raw_chunks.append({
+                "text": tbl,
+                "heading": "[Table]",
+                "section_path": [],
+                "node_type": TABLE,
             })
-        
-        # If no sections found, return entire text
-        if not sections:
-            sections = [{'heading': '', 'text': text}]
-        
-        return sections
-    
-    def _split_text(
-        self,
-        text: str,
-        start_position: int,
-        heading: str = ""
-    ) -> List[Dict]:
-        """
-        Split text into chunks with overlap
-        """
+
+        # Assign sequential ids and merge metadata
         chunks = []
-        
-        # Split by sentences
-        sentences = nltk.sent_tokenize(text)
-        
-        current_chunk = ""
-        chunk_start = start_position
-        
-        for sentence in sentences:
-            # Check if adding sentence exceeds chunk size
-            if len(current_chunk) + len(sentence) > self.chunk_size and current_chunk:
-                # Save current chunk
-                chunks.append({
-                    'text': current_chunk.strip(),
-                    'heading': heading,
-                    'char_start': chunk_start,
-                    'char_end': chunk_start + len(current_chunk)
-                })
-                
-                # Start new chunk with overlap
-                overlap_text = self._get_overlap(current_chunk)
-                current_chunk = overlap_text + " " + sentence
-                chunk_start = chunk_start + len(current_chunk) - len(overlap_text)
-            else:
-                current_chunk += " " + sentence if current_chunk else sentence
-        
-        # Add final chunk
-        if current_chunk.strip() and len(current_chunk.strip()) >= self.min_chunk_size:
+        for i, chunk in enumerate(raw_chunks):
+            if len(chunk["text"].strip()) < self.min_chunk_size:
+                continue
             chunks.append({
-                'text': current_chunk.strip(),
-                'heading': heading,
-                'char_start': chunk_start,
-                'char_end': chunk_start + len(current_chunk)
+                "ord": len(chunks),
+                "text": chunk["text"].strip(),
+                "heading": chunk.get("heading", ""),
+                "section_path": " > ".join(chunk.get("section_path", [])),
+                "node_type": chunk.get("node_type", TEXT),
+                "metadata": metadata,
             })
-        
+
+        logger.info(f"Created {len(chunks)} chunks (incl. {len(tables)} tables)")
         return chunks
-    
+
+    # ------------------------------------------------------------------
+    # Structure parsing
+    # ------------------------------------------------------------------
+
+    def _parse_structure(self, text: str) -> List[StructureNode]:
+        """Parse text into structural nodes at H1/H2/H3 levels."""
+        lines = text.split("\n")
+        nodes: List[StructureNode] = []
+        current_h1 = StructureNode(H1, "", "")
+        current_h2: Optional[StructureNode] = None
+        current_h3: Optional[StructureNode] = None
+        buffer: List[str] = []
+
+        def flush_buffer(target_node: Optional[StructureNode]):
+            if buffer and target_node is not None:
+                target_node.text += "\n".join(buffer) + "\n"
+            buffer.clear()
+
+        for line in lines:
+            level, heading = self._detect_heading(line)
+
+            if level == H1:
+                flush_buffer(current_h3 or current_h2 or current_h1)
+                if current_h1.heading or current_h1.text or current_h1.children:
+                    nodes.append(current_h1)
+                current_h1 = StructureNode(H1, heading, "")
+                current_h2 = None
+                current_h3 = None
+
+            elif level == H2:
+                flush_buffer(current_h3 or current_h2 or current_h1)
+                current_h2 = StructureNode(H2, heading, "")
+                current_h3 = None
+                current_h1.children.append(current_h2)
+
+            elif level == H3:
+                flush_buffer(current_h3 or current_h2 or current_h1)
+                current_h3 = StructureNode(H3, heading, "")
+                if current_h2:
+                    current_h2.children.append(current_h3)
+                else:
+                    current_h1.children.append(current_h3)
+
+            else:
+                buffer.append(line)
+
+        flush_buffer(current_h3 or current_h2 or current_h1)
+        nodes.append(current_h1)
+
+        # If we only got a single unnamed root with no children, treat as flat
+        if len(nodes) == 1 and not nodes[0].heading and not nodes[0].children:
+            return [nodes[0]]
+
+        return [n for n in nodes if n.heading or n.text.strip() or n.children]
+
+    def _detect_heading(self, line: str) -> Tuple[Optional[int], str]:
+        """Return (level, heading_text) for a line, or (None, '') if not a heading."""
+        stripped = line.strip()
+        if not stripped:
+            return None, ""
+
+        # Markdown headings take priority
+        if stripped.startswith("### "):
+            return H3, stripped[4:].strip()
+        if stripped.startswith("## "):
+            return H2, stripped[3:].strip()
+        if stripped.startswith("# ") and not stripped.startswith("##"):
+            return H1, stripped[2:].strip()
+
+        # Legal H1 patterns
+        if self._LEGAL_H1.match(stripped):
+            return H1, stripped
+
+        # Legal H2 patterns
+        if self._LEGAL_H2.match(stripped):
+            return H2, stripped
+
+        # Legal H3 patterns
+        if self._LEGAL_H3.match(stripped):
+            return H3, stripped
+
+        return None, ""
+
+    # ------------------------------------------------------------------
+    # Flattening / recursive splitting
+    # ------------------------------------------------------------------
+
+    def _flatten_node(
+        self,
+        node: StructureNode,
+        out: List[Dict],
+        parent_path: List[str],
+    ):
+        """Recursively flatten a node tree into chunks."""
+        path = parent_path + ([node.heading] if node.heading else [])
+
+        if node.node_type == TABLE:
+            out.append({"text": node.text, "heading": node.heading,
+                        "section_path": path, "node_type": TABLE})
+            return
+
+        if not node.children:
+            # Leaf node — split by size
+            self._emit_leaf(node.text, node.heading, path, out)
+            return
+
+        # Node has children: emit own text as a preamble chunk if non-trivial
+        if len(node.text.strip()) >= self.min_chunk_size:
+            self._emit_leaf(node.text, node.heading, path, out)
+
+        for child in node.children:
+            self._flatten_node(child, out, path)
+
+    def _emit_leaf(self, text: str, heading: str, path: List[str], out: List[Dict]):
+        """Emit one or more chunks from leaf text."""
+        text = text.strip()
+        if not text:
+            return
+
+        if len(text) <= self.chunk_size:
+            out.append({"text": text, "heading": heading, "section_path": path})
+            return
+
+        # Text is too big — split into overlapping sentence-based chunks
+        sub_chunks = self._sentence_split(text, heading)
+        for sc in sub_chunks:
+            out.append({"text": sc, "heading": heading, "section_path": path})
+
+    def _sentence_split(self, text: str, heading: str) -> List[str]:
+        """Split oversized text into overlapping sentence-based chunks."""
+        try:
+            sentences = nltk.sent_tokenize(text)
+        except Exception:
+            # Fallback: split by double newline, then by chunk_size
+            sentences = [p for p in text.split("\n\n") if p.strip()]
+
+        chunks = []
+        current = ""
+        overlap_buffer = ""
+
+        for sent in sentences:
+            if len(current) + len(sent) > self.chunk_size and current:
+                if len(current.strip()) >= self.min_chunk_size:
+                    chunks.append(current.strip())
+                # Overlap: take last N chars at sentence boundary
+                overlap_buffer = self._get_overlap(current)
+                current = overlap_buffer + " " + sent
+            else:
+                current = (current + " " + sent).strip() if current else sent
+
+        if current.strip() and len(current.strip()) >= self.min_chunk_size:
+            chunks.append(current.strip())
+
+        return chunks if chunks else [text[: self.chunk_size]]
+
     def _get_overlap(self, text: str) -> str:
-        """Get overlap text from end of chunk"""
+        """Extract overlap text (last ~chunk_overlap chars at sentence boundary)."""
         if len(text) <= self.chunk_overlap:
             return text
-        
-        # Try to get overlap at sentence boundary
-        sentences = nltk.sent_tokenize(text)
+        try:
+            sentences = nltk.sent_tokenize(text)
+        except Exception:
+            return text[-self.chunk_overlap:]
+
         overlap = ""
-        
-        for sentence in reversed(sentences):
-            if len(overlap) + len(sentence) <= self.chunk_overlap:
-                overlap = sentence + " " + overlap
+        for sent in reversed(sentences):
+            if len(overlap) + len(sent) <= self.chunk_overlap:
+                overlap = sent + " " + overlap
             else:
                 break
-        
-        # Fallback to character-based overlap
-        if not overlap:
-            overlap = text[-self.chunk_overlap:]
-        
-        return overlap.strip()
+        return overlap.strip() or text[-self.chunk_overlap:]
+
+    # ------------------------------------------------------------------
+    # Table extraction
+    # ------------------------------------------------------------------
+
+    def _extract_tables(self, text: str) -> Tuple[str, List[str]]:
+        """
+        Extract Markdown-style tables from text, replace with placeholders.
+        Returns (cleaned_text, list_of_table_strings).
+        """
+        tables: List[str] = []
+        lines = text.split("\n")
+        result_lines: List[str] = []
+        in_table = False
+        table_lines: List[str] = []
+
+        for line in lines:
+            is_table_line = bool(self._TABLE_ROW.match(line.strip())) or \
+                            bool(self._TABLE_BORDER.match(line.strip()))
+
+            if is_table_line:
+                in_table = True
+                table_lines.append(line)
+            else:
+                if in_table:
+                    tables.append("\n".join(table_lines))
+                    result_lines.append(f"[TABLE_{len(tables) - 1}]")
+                    table_lines = []
+                    in_table = False
+                result_lines.append(line)
+
+        if table_lines:
+            tables.append("\n".join(table_lines))
+            result_lines.append(f"[TABLE_{len(tables) - 1}]")
+
+        return "\n".join(result_lines), tables
+
+    # ------------------------------------------------------------------
+    # Text normalization
+    # ------------------------------------------------------------------
+
+    def _normalize(self, text: str) -> str:
+        """Normalize whitespace without destroying structure."""
+        # Collapse runs of 3+ blank lines to 2
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Strip trailing whitespace per line
+        text = "\n".join(line.rstrip() for line in text.split("\n"))
+        return text.strip()
 
 
-# Factory function
-def create_chunker(chunk_size: int = 500, chunk_overlap: int = 100) -> DocumentChunker:
-    """Create a document chunker with specified parameters"""
-    return DocumentChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+def create_chunker(chunk_size: int = 800, chunk_overlap: int = 150) -> HierarchicalChunker:
+    return HierarchicalChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)

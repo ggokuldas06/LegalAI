@@ -190,7 +190,6 @@ def vector_store_stats(request):
             'data': {
                 'total_vectors': vector_store.size,
                 'user_chunks': user_chunks,
-                'embedding_dimension': vector_store.embedding_dim,
             }
         })
         

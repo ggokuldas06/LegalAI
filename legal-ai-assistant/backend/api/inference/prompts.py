@@ -2,249 +2,159 @@
 from typing import Dict, List, Optional
 
 
-class PromptTemplate:
-    """Base class for prompt templates"""
-
-    SYSTEM_INSTRUCTION = """You are a legal AI assistant. You provide informational analysis only, not legal advice. Always cite your sources and never fabricate information."""
-
-    LEGAL_DISCLAIMER = """\n\n---\nDISCLAIMER: This is informational analysis only and does not constitute legal advice. Consult a qualified attorney for legal guidance."""
-
-    @staticmethod
-    def format_llama2_prompt(system: str, user_message: str) -> str:
-        """Format prompt for LLaMA 2 Chat"""
-        return f"""<s>[INST] <<SYS>>
-{system}
-<</SYS>>
-
-{user_message} [/INST]"""
+# Ollama /api/chat uses a messages list — Gemma's template is handled by Ollama.
+# Each message: {"role": "system"|"user"|"assistant", "content": "..."}
 
 
-class SummarizerPrompt(PromptTemplate):
-    """Mode A: Document Summarizer"""
+LEGAL_DISCLAIMER = (
+    "\n\n---\n"
+    "**DISCLAIMER:** This is informational analysis only and does not constitute "
+    "legal advice. Consult a qualified attorney for legal guidance."
+)
 
-    SYSTEM = """You are a legal document summarizer. Produce a clean, human-readable Markdown summary with these sections:
 
-## Executive Summary
-- 2–3 bullet points
+class SummarizerPrompt:
+    """Mode A: Document summary in Markdown."""
 
-## Key Points
-- 4–6 important points
-
-## Risks
-- Identified legal risks
-
-## Obligations
-- Key obligations and deadlines
-
-Every point MUST include a citation in the format: [Section X, paragraph Y].
-
-IMPORTANT: Output **raw Markdown only**, and wrap the entire Markdown output inside a fenced code block annotated as `markdown`, for example:
-
-```markdown
-## Executive Summary
-- ...
-```
-
-Do NOT output JSON, extraneous commentary, or any text outside the fenced code block. Never fabricate information."""
+    SYSTEM = (
+        "You are a legal document summarizer. "
+        "Produce a concise Markdown summary with these sections: "
+        "## Executive Summary (2-3 bullets), "
+        "## Key Points (4-6 bullets), "
+        "## Risks (identified legal risks), "
+        "## Obligations (key obligations and deadlines). "
+        "Every bullet MUST include a citation: [Section X, paragraph Y]. "
+        "Output raw Markdown only. Never fabricate information."
+    )
 
     @classmethod
-    def build(cls, document_text: str, document_title: str) -> str:
-        """Build summarizer prompt"""
-        user_message = f"""Analyze this legal document and provide a Markdown summary.
-
-Document: {document_title}
-
-Text:
-{document_text}
-
-Return the summary in **raw Markdown syntax**, and wrap the entire Markdown output inside a fenced code block annotated as 'markdown'. Use this structure inside the code block:
-
-```markdown
-## Executive Summary
-- point with [Section X, paragraph Y]
-
-## Key Points
-- point with [Section X, paragraph Y]
-
-## Risks
-- point with [Section X, paragraph Y]
-
-## Obligations
-- point with [Section X, paragraph Y]
-```
-
-Do not output anything outside the fenced code block, and do not output JSON. Never fabricate information."""
-
-        return cls.format_llama2_prompt(cls.SYSTEM, user_message)
+    def build_messages(cls, document_text: str, document_title: str) -> List[Dict]:
+        user = (
+            f"Analyze this legal document and provide a structured Markdown summary.\n\n"
+            f"**Document:** {document_title}\n\n"
+            f"**Text:**\n{document_text}\n\n"
+            "Output structured Markdown with ## headings and bullet points. "
+            "Cite every claim as [Section X, paragraph Y]. Never invent information."
+        )
+        return [
+            {"role": "system", "content": cls.SYSTEM},
+            {"role": "user", "content": user},
+        ]
 
 
-class ClauseClassifierPrompt(PromptTemplate):
-    """Mode B: Clause Detection & Classification"""
+class ClauseClassifierPrompt:
+    """Mode B: Clause detection and classification."""
 
     CLAUSE_TYPES = [
-        'Termination',
-        'Indemnity', 
-        'Confidentiality',
-        'Intellectual Property',
-        'Liability Caps',
-        'Governing Law',
-        'Payment Terms',
-        'Warranties',
-        'Force Majeure',
-        'Assignment',
+        "Termination", "Indemnity", "Confidentiality", "Intellectual Property",
+        "Liability Caps", "Governing Law", "Payment Terms", "Warranties",
+        "Force Majeure", "Assignment",
     ]
 
-    SYSTEM = SYSTEM = """You are a contract clause classifier. Detect and extract contract clauses and present them in a clear, human-readable format.
-Task rules (CRITICAL):
-
-For each clause you find, output the following fields in this exact order: Clause Type, Citation (nearest section header), Confidence (high/medium/low), Excerpt (verbatim, preserve original line breaks and bullets).
-
-Use the nearest preceding section header (e.g., 'Section 3 — PAYMENT TERMS' or 'Section 4.2') to determine the citation. Do not guess a section number from nearby numbers in the text — use the actual header if present.
-
-Include full clause text (do not truncate). If the clause contains sub-points or bullets, include them all verbatim.
-
-If a clause spans multiple sections, indicate the range (e.g., 'Section 6.1–6.3').
-
-If a clause is present but unclear, mark confidence 'medium' and explain in one short parenthetical note why.
-
-If a clause type is not present, do NOT fabricate — simply omit it.
-
-Do NOT output JSON. Provide a human-readable Markdown list of clauses, wrapped in a fenced code block annotated as text (or markdown), so the output is preserved exactly.
-
-Preferred output layout inside fenced block (literal example — follow this structure exactly):
-
-text
-Copy code
-Clause Type: Confidentiality
-Citation: Section 4 — CONFIDENTIALITY
-Confidence: high
-Excerpt:
-Both Parties must maintain strict confidentiality over Confidential Information.
-Confidentiality obligations survive for 5 years following termination.
-Forbidden Activities:
-  (a) disclose scientific research data to third parties;
-  (b) decompile or reverse engineer proprietary tools;
-  (c) store Client data in non-approved cloud environments.
-
-----
-Clause Type: Payment Terms
-Citation: Section 3 — PAYMENT TERMS
-Confidence: high
-Excerpt:
-3.1 Fees. Client shall compensate Service Provider at $250/hour for engineering work and $300/hour for compliance-oriented consulting.
-3.2 Monthly Invoicing. Invoices must include itemized time logs.
-3.3 Late Payments. Any invoice not paid within 30 days accrues 1.25% monthly interest.
-
-----
-[and so on...]
-Only output clauses found in the document. Never invent clause text or citations. Keep the output inside the single fenced code block and do not add extra commentary outside the block."""
+    SYSTEM = (
+        "You are a contract clause classifier. "
+        "For each clause found, output:\n"
+        "**Clause Type:** <type>\n"
+        "**Citation:** <nearest section header>\n"
+        "**Confidence:** high | medium | low\n"
+        "**Excerpt:** (verbatim text, preserve bullets and sub-points)\n"
+        "---\n"
+        "Rules: use the nearest section header as citation; never invent clause text; "
+        "omit clause types not present; include full clause text without truncation. "
+        "Output raw Markdown only."
+    )
 
     @classmethod
-    def build(cls, document_text: str, document_title: str, 
-              clause_types: Optional[List[str]] = None) -> str:
-        """Build clause classifier prompt"""
-        types = clause_types or cls.CLAUSE_TYPES
-        types_str = ", ".join(types)
+    def build_messages(
+        cls,
+        document_text: str,
+        document_title: str,
+        clause_types: Optional[List[str]] = None,
+    ) -> List[Dict]:
+        types_str = ", ".join(clause_types or cls.CLAUSE_TYPES)
+        user = (
+            f"Extract the following clause types from this contract: {types_str}\n\n"
+            f"**Document:** {document_title}\n\n"
+            f"**Text:**\n{document_text}\n\n"
+            "Follow the output format exactly. Only extract clauses that are clearly present."
+        )
+        return [
+            {"role": "system", "content": cls.SYSTEM},
+            {"role": "user", "content": user},
+        ]
 
-        user_message = f"""Analyze this contract and extract the following clause types: {types_str}
 
-Document: {document_title}
+class CaseLawPrompt:
+    """Mode C: Legal Q&A with adaptive format — IRAC for analysis, direct for lookups."""
 
-Text:
-{document_text}
-
-Follow the output format and rules specified in the system instructions exactly.
-
-Only extract clauses that are clearly present. Do not fabricate."""
-
-        return cls.format_llama2_prompt(cls.SYSTEM, user_message)
-
-
-class CaseLawPrompt(PromptTemplate):
-    """Mode C: Case-Law IRAC Q&A"""
-
-    SYSTEM = """You are a legal research assistant specializing in case law analysis. Answer questions using IRAC structure:
-
-I - Issue: What is the legal question?
-R - Rule: What legal principles apply? (with case citations)
-A - Application: How do cases apply to this situation? (with citations)
-C - Conclusion: What is the answer? (with citations)
-
-CRITICAL RULES:
-1. EVERY factual claim must have a citation in format: [Case Name, Year]
-2. If you don't have sufficient information, say "Insufficient basis from provided sources"
-3. Never invent case names or holdings
-4. Be precise and cautious"""
+    SYSTEM = (
+        "You are a precise legal research assistant. "
+        "Read the provided sources carefully and answer the question using the format that fits best:\n\n"
+        "• **Factual lookup** (who, what, when, how much, which section): "
+        "Answer directly in 1–3 sentences. Always cite the source inline as [Source N] or [Section X].\n\n"
+        "• **Legal analysis** (whether X is permitted, what happens if Y, analyse/explain a clause, "
+        "compare obligations, identify risks): "
+        "Use IRAC structure:\n"
+        "  **Issue:** State the legal question.\n"
+        "  **Rule:** State the applicable clause or principle with citation.\n"
+        "  **Application:** Apply the rule to the facts with citations.\n"
+        "  **Conclusion:** Give a clear answer.\n\n"
+        "RULES: Answer using ONLY the provided sources. "
+        "Cite every factual claim as [Source N] or [Section X, Document Title]. "
+        "If the sources do not contain the answer, say exactly: "
+        "'The provided sources do not contain enough information to answer this question.' "
+        "Never invent facts, names, numbers, or holdings."
+    )
 
     @classmethod
-    def build(cls, question: str, context_passages: List[Dict[str, str]]) -> str:
-        """Build case law Q&A prompt with retrieved context"""
+    def build_messages(cls, question: str, context_passages: List[Dict]) -> List[Dict]:
+        ctx = ""
+        for i, p in enumerate(context_passages, 1):
+            title = p.get("case_name") or p.get("title", "Unknown")
+            year = p.get("year", "n.d.")
+            heading = p.get("heading", "")
+            section = p.get("section_path", "")
+            text = p.get("text", "")
+            loc = f" — {heading or section}" if (heading or section) else ""
+            ctx += f"\n[Source {i}] {title} ({year}){loc}:\n{text}\n"
 
-        # Format context passages
-        context_str = ""
-        for i, passage in enumerate(context_passages, 1):
-            case_name = passage.get('case_name', 'Unknown')
-            year = passage.get('year', 'n.d.')
-            text = passage.get('text', '')
-
-            context_str += f"\n[{i}] {case_name} ({year}):\n{text}\n"
-
-        user_message = f"""Question: {question}
-
-Relevant Case Law:
-{context_str}
-
-Provide an IRAC-structured answer using ONLY the provided sources. Cite every claim.
-
-Format:
-**Issue:**
-[State the legal question]
-
-**Rule:**
-[Legal principles with citations]
-
-**Application:**
-[How cases apply with citations]
-
-**Conclusion:**
-[Answer with supporting citations]"""
-
-        return cls.format_llama2_prompt(cls.SYSTEM, user_message)
+        user = (
+            f"**Question:** {question}\n\n"
+            f"**Relevant Sources:**\n{ctx}\n\n"
+            "Choose the appropriate format (direct answer or IRAC) based on the question type, "
+            "then answer using ONLY the sources above. Cite every claim."
+        )
+        return [
+            {"role": "system", "content": cls.SYSTEM},
+            {"role": "user", "content": user},
+        ]
 
 
 class PromptBuilder:
-    """Factory for building prompts"""
+    """Factory: build Ollama chat messages for each mode."""
 
     @staticmethod
-    def build_prompt(mode: str, **kwargs) -> str:
-        """
-        Build prompt for specified mode
-
-        Args:
-            mode: 'A', 'B', or 'C'
-            **kwargs: Mode-specific parameters
-
-        Returns:
-            Formatted prompt string
-        """
-        if mode == 'A':
-            return SummarizerPrompt.build(
-                document_text=kwargs['document_text'],
-                document_title=kwargs.get('document_title', 'Untitled')
+    def build_messages(mode: str, **kwargs) -> List[Dict]:
+        if mode == "A":
+            return SummarizerPrompt.build_messages(
+                document_text=kwargs["document_text"],
+                document_title=kwargs.get("document_title", "Untitled"),
             )
-
-        elif mode == 'B':
-            return ClauseClassifierPrompt.build(
-                document_text=kwargs['document_text'],
-                document_title=kwargs.get('document_title', 'Untitled'),
-                clause_types=kwargs.get('clause_types')
+        elif mode == "B":
+            return ClauseClassifierPrompt.build_messages(
+                document_text=kwargs["document_text"],
+                document_title=kwargs.get("document_title", "Untitled"),
+                clause_types=kwargs.get("clause_types"),
             )
-
-        elif mode == 'C':
-            return CaseLawPrompt.build(
-                question=kwargs['question'],
-                context_passages=kwargs.get('context_passages', [])
+        elif mode == "C":
+            return CaseLawPrompt.build_messages(
+                question=kwargs["question"],
+                context_passages=kwargs.get("context_passages", []),
             )
-
         else:
             raise ValueError(f"Unknown mode: {mode}")
+
+    # Keep old name for backward compat
+    @staticmethod
+    def build_prompt(mode: str, **kwargs) -> List[Dict]:
+        return PromptBuilder.build_messages(mode, **kwargs)

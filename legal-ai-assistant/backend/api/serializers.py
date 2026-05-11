@@ -103,15 +103,6 @@ class ChatRequestSerializer(serializers.Serializer):
     stream = serializers.BooleanField(required=False, default=False)
     
     def validate(self, data):
-        """Custom validation based on mode"""
-        mode = data['mode']
-        
-        # Modes A and B require a document
-        if mode in ['A', 'B'] and not data.get('doc_id'):
-            raise serializers.ValidationError({
-                'doc_id': f'doc_id is required for mode {mode}'
-            })
-        
         return data
 
 

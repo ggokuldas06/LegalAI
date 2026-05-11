@@ -5,7 +5,7 @@
       <textarea
         v-model="message"
         class="form-control"
-        placeholder="Type your message..."
+        :placeholder="placeholder || 'Type your message…'"
         rows="3"
         :disabled="disabled"
         @keydown.enter.exact="handleSend"
@@ -35,10 +35,8 @@
 import { ref } from 'vue'
 
 defineProps({
-  disabled: {
-    type: Boolean,
-    default: false,
-  },
+  disabled: { type: Boolean, default: false },
+  placeholder: { type: String, default: '' },
 })
 
 const emit = defineEmits(['send'])
