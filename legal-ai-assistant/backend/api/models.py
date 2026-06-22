@@ -30,6 +30,7 @@ class ChatLog(models.Model):
         ('A', 'Summarizer'),
         ('B', 'Clause Classifier'),
         ('C', 'Case-Law IRAC'),
+        ('D', 'Case Agentic Q&A'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_logs')
@@ -75,16 +76,25 @@ class Document(models.Model):
         ('statute', 'Statute'),
         ('other', 'Other'),
     ]
+    FILE_TYPE_CHOICES = [
+        ('pdf', 'PDF'),
+        ('image', 'Image'),
+        ('text', 'Text'),
+    ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='documents')
     doctype = models.CharField(max_length=20, choices=DOCTYPE_CHOICES)
     title = models.CharField(max_length=500)
-    jurisdiction = models.CharField(max_length=100, blank=True)  # "US", "EU", "UK-ENG"
-    date = models.DateField(null=True, blank=True)  # Document date or case date
-    path = models.CharField(max_length=1000)  # File path on disk
-    source = models.CharField(max_length=500, blank=True)  # Original source/URL
-    sha256 = models.CharField(max_length=64, unique=True)  # File hash for deduplication
-    meta_json = models.JSONField(default=dict, blank=True)  # Additional metadata
+    jurisdiction = models.CharField(max_length=100, blank=True)
+    date = models.DateField(null=True, blank=True)
+    path = models.CharField(max_length=1000)
+    source = models.CharField(max_length=500, blank=True)
+    sha256 = models.CharField(max_length=64, unique=True)
+    meta_json = models.JSONField(default=dict, blank=True)
+    # v2.0 fields
+    file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES, default='pdf')
+    page_count = models.IntegerField(default=0)
+    doc_description = models.TextField(blank=True)  # LLM-generated JSON description for routing
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -98,6 +108,56 @@ class Document(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.doctype})"
+
+
+class Case(models.Model):
+    """Groups multiple documents + images into a legal case for agentic RAG"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='cases')
+    title = models.CharField(max_length=500)
+    description = models.TextField(blank=True)
+    documents = models.ManyToManyField(
+        Document,
+        through='CaseDocument',
+        related_name='cases',
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'cases'
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['user', '-updated_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.user.username})"
+
+
+class CaseDocument(models.Model):
+    """Junction table for Case ↔ Document with optional role annotation"""
+    ROLE_CHOICES = [
+        ('primary', 'Primary Document'),
+        ('evidence', 'Evidence'),
+        ('reference', 'Reference'),
+        ('contract', 'Contract'),
+        ('exhibit', 'Exhibit'),
+        ('other', 'Other'),
+    ]
+
+    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name='case_documents')
+    document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='case_documents')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='other')
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'case_documents'
+        unique_together = [['case', 'document']]
+        ordering = ['added_at']
+
+    def __str__(self):
+        return f"{self.document.title} in {self.case.title} ({self.role})"
 
 
 class Chunk(models.Model):
@@ -142,6 +202,9 @@ class AuditLog(models.Model):
         ('chat', 'Chat Request'),
         ('export', 'Data Export'),
         ('settings_change', 'Settings Change'),
+        ('case_create', 'Case Create'),
+        ('case_delete', 'Case Delete'),
+        ('delete', 'Document Delete'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')

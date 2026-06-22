@@ -7,6 +7,7 @@ export const useChatStore = defineStore('chat', {
     messages: [],
     currentMode: 'A',
     selectedDocument: null,
+    selectedCase: null,
     isLoading: false,
     isStreaming: false,
     error: null,
@@ -21,7 +22,12 @@ export const useChatStore = defineStore('chat', {
 
   getters: {
     modeLabel: (state) => {
-      const labels = { A: 'Summarizer', B: 'Clause Classifier', C: 'Case-Law IRAC' }
+      const labels = {
+        A: 'Summarizer',
+        B: 'Clause Classifier',
+        C: 'Case-Law IRAC',
+        D: 'Case Agentic Q&A',
+      }
       return labels[state.currentMode] || 'Unknown'
     },
   },
@@ -35,6 +41,10 @@ export const useChatStore = defineStore('chat', {
 
     setDocument(document) {
       this.selectedDocument = document
+    },
+
+    setCase(c) {
+      this.selectedCase = c
     },
 
     setFilters(filters) {
@@ -65,10 +75,14 @@ export const useChatStore = defineStore('chat', {
 
       if (this.currentMode === 'C') {
         payload.filters = this.filters
-        // Optional: scope retrieval to a specific document
         if (this.selectedDocument) {
           payload.doc_id = this.selectedDocument.id
         }
+      }
+
+      if (this.currentMode === 'D') {
+        if (!this.selectedCase) throw new Error('Please select a case first')
+        payload.case_id = this.selectedCase.id
       }
 
       // Add placeholder assistant message for streaming
@@ -82,6 +96,11 @@ export const useChatStore = defineStore('chat', {
 
       try {
         await chatAPI.sendMessageStream(payload, {
+          onStart: (startChunk) => {
+            if (startChunk.agent_trace) {
+              this.messages[assistantMsgIndex].agent_trace = startChunk.agent_trace
+            }
+          },
           onToken: (token) => {
             this.isStreaming = true
             this.messages[assistantMsgIndex].content += token

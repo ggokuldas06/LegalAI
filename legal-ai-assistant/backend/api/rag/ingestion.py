@@ -1,20 +1,30 @@
 # api/rag/ingestion.py
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict
 import logging
 from django.db import transaction
-import PyPDF2
+
+import fitz  # pymupdf
 
 from ..models import Document, Chunk
 from .chunker import HierarchicalChunker
 from .embeddings import embedding_service
 from .chroma_store import get_vector_store
+from .vision_extractor import vision_extractor
+from .doc_describer import doc_describer
 
 logger = logging.getLogger(__name__)
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp", ".gif"}
+TEXT_EXTENSIONS = {".txt", ".md"}
+PDF_EXTENSION = ".pdf"
+
+# Pages with fewer characters than this trigger vision OCR fallback
+OCR_FALLBACK_THRESHOLD = 50
+
 
 class IngestionService:
-    """Ingest documents: hierarchical chunk → embed → index in ChromaDB"""
+    """Ingest documents and images: extract → hierarchical chunk → embed → ChromaDB + BM25"""
 
     def __init__(self):
         self.chunker = HierarchicalChunker(chunk_size=800, chunk_overlap=150)
@@ -34,8 +44,8 @@ class IngestionService:
                 self.vector_store.delete_by_document(document.id)
 
             text = self._extract_text(document)
-            if not text or len(text.strip()) < 100:
-                raise ValueError("Document text too short or empty")
+            if not text or len(text.strip()) < 30:
+                raise ValueError("Document text too short or empty after extraction")
 
             base_meta = {
                 "document_id": document.id,
@@ -44,6 +54,7 @@ class IngestionService:
                 "jurisdiction": document.jurisdiction or "",
                 "year": document.date.year if document.date else 0,
                 "source": document.source or "",
+                "file_type": document.file_type,
             }
 
             chunks_data = self.chunker.chunk_text(
@@ -55,9 +66,7 @@ class IngestionService:
 
             chunk_texts = [c["text"] for c in chunks_data]
             embeddings = self.embedding_service.encode(chunk_texts, batch_size=32)
-            logger.info(f"Generated {len(embeddings)} embeddings")
 
-            # Save chunks to Django ORM
             chunk_objects = []
             for chunk_data, emb in zip(chunks_data, embeddings):
                 chunk_objects.append(Chunk(
@@ -68,9 +77,7 @@ class IngestionService:
                     embedding_json=emb.tolist(),
                 ))
             Chunk.objects.bulk_create(chunk_objects)
-            logger.info(f"Saved {len(chunk_objects)} chunks to DB")
 
-            # Index into ChromaDB
             ids, texts, emb_lists, metas = [], [], [], []
             for chunk_data, chunk_obj, emb in zip(chunks_data, chunk_objects, embeddings):
                 meta = base_meta.copy()
@@ -87,7 +94,10 @@ class IngestionService:
                 metas.append(meta)
 
             self.vector_store.add_chunks(ids, texts, emb_lists, metas)
-            logger.info(f"Indexed {len(ids)} chunks in ChromaDB")
+            logger.info(f"Indexed {len(ids)} chunks for document {document.id}")
+
+            # Generate routing description (non-blocking — runs after index)
+            self._generate_description(document, text)
 
             return {
                 "success": True,
@@ -100,22 +110,88 @@ class IngestionService:
             logger.error(f"Ingestion error for doc {document.id}: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    # ------------------------------------------------------------------
+    # Text extraction
+    # ------------------------------------------------------------------
+
     def _extract_text(self, document: Document) -> str:
         ext = os.path.splitext(document.path)[1].lower()
-        if ext in (".txt", ".md"):
-            with open(document.path, "r", encoding="utf-8") as f:
+
+        if ext in TEXT_EXTENSIONS:
+            document.file_type = "text"
+            document.save(update_fields=["file_type"])
+            with open(document.path, "r", encoding="utf-8", errors="replace") as f:
                 return f.read()
-        elif ext == ".pdf":
-            text = ""
-            with open(document.path, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-            return text
+
+        elif ext == PDF_EXTENSION:
+            return self._extract_pdf(document)
+
+        elif ext in IMAGE_EXTENSIONS:
+            return self._extract_image(document)
+
         else:
             raise ValueError(f"Unsupported file type: {ext}")
+
+    def _extract_pdf(self, document: Document) -> str:
+        """Extract text from PDF using pymupdf with per-page OCR fallback for scanned pages."""
+        doc = fitz.open(document.path)
+        pages_text: List[str] = []
+        ocr_pages = 0
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            text = page.get_text("text").strip()
+
+            if len(text) < OCR_FALLBACK_THRESHOLD:
+                # Scanned page — use vision model
+                logger.info(f"Page {page_num} of doc {document.id} sparse, using OCR fallback")
+                text = vision_extractor.extract_from_pdf_page(document.path, page_num)
+                ocr_pages += 1
+
+            if text:
+                pages_text.append(text)
+
+        doc.close()
+        page_count = len(pages_text)
+
+        document.file_type = "pdf"
+        document.page_count = page_count
+        document.save(update_fields=["file_type", "page_count"])
+
+        if ocr_pages:
+            logger.info(f"Doc {document.id}: {ocr_pages}/{page_count} pages used OCR fallback")
+
+        return "\n\n".join(pages_text)
+
+    def _extract_image(self, document: Document) -> str:
+        """Extract text/description from an image file via vision model."""
+        document.file_type = "image"
+        document.page_count = 1
+        document.save(update_fields=["file_type", "page_count"])
+        return vision_extractor.extract_from_image(document.path)
+
+    # ------------------------------------------------------------------
+    # Description generation
+    # ------------------------------------------------------------------
+
+    def _generate_description(self, document: Document, full_text: str):
+        """Generate and store routing description. Runs after chunking, saves to DB."""
+        try:
+            description_json = doc_describer.generate_description(
+                title=document.title,
+                doctype=document.doctype,
+                file_type=document.file_type,
+                full_text=full_text,
+            )
+            document.doc_description = description_json
+            document.save(update_fields=["doc_description"])
+            logger.info(f"Description saved for document {document.id}")
+        except Exception as e:
+            logger.error(f"Description generation failed for doc {document.id}: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Batch
+    # ------------------------------------------------------------------
 
     def ingest_multiple(self, documents: List[Document], reindex: bool = False) -> Dict:
         results = [self.ingest_document(doc, reindex) for doc in documents]

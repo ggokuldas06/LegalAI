@@ -24,6 +24,9 @@
 
         <!-- Assistant -->
         <div v-else class="assistant-message">
+          <!-- Agent trace (Mode D) -->
+          <AgentTrace v-if="message.agent_trace" :trace="message.agent_trace" />
+
           <!-- Streaming cursor -->
           <div v-if="message.streaming" class="streaming-indicator mb-2">
             <span class="typing-dot"></span>
@@ -85,6 +88,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import AgentTrace from './AgentTrace.vue'
 
 const props = defineProps({
   message: { type: Object, required: true },

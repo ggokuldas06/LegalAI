@@ -68,7 +68,7 @@ export const chatAPI = {
    * @param {Object} payload  - request body (mode, message, …)
    * @param {Object} handlers - { onToken, onDone, onError }
    */
-  async sendMessageStream(payload, { onToken, onDone, onError } = {}) {
+  async sendMessageStream(payload, { onStart, onToken, onDone, onError } = {}) {
     const token = localStorage.getItem('access_token')
     const headers = {
       'Content-Type': 'application/json',
@@ -116,7 +116,9 @@ export const chatAPI = {
 
         try {
           const chunk = JSON.parse(json)
-          if (chunk.type === 'token') {
+          if (chunk.type === 'start') {
+            onStart?.(chunk)
+          } else if (chunk.type === 'token') {
             onToken?.(chunk.token || '')
           } else if (chunk.type === 'done') {
             onDone?.(chunk)
@@ -139,6 +141,19 @@ export const documentAPI = {
     }),
   delete: (id) => api.delete(`/documents/${id}/delete`),
   getContent: (id) => api.get(`/documents/${id}/content`),
+  describe: (id) => api.post(`/documents/${id}/describe`),
+}
+
+// Cases API
+export const casesAPI = {
+  list: () => api.get('/cases'),
+  create: (data) => api.post('/cases', data),
+  get: (id) => api.get(`/cases/${id}`),
+  update: (id, data) => api.patch(`/cases/${id}`, data),
+  delete: (id) => api.delete(`/cases/${id}`),
+  addDocuments: (caseId, documentIds, role = 'other') =>
+    api.post(`/cases/${caseId}/documents`, { document_ids: documentIds, role }),
+  removeDocument: (caseId, docId) => api.delete(`/cases/${caseId}/documents/${docId}`),
 }
 
 // History API

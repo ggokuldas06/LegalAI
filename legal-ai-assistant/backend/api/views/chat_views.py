@@ -19,21 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_document_text(document: Document) -> str:
-    """Extract plain text from a document file (PDF, TXT, or MD)."""
+    """Extract plain text from a document file (PDF, TXT, MD, or image)."""
     ext = os.path.splitext(document.path)[1].lower()
     if ext in (".txt", ".md"):
         with open(document.path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
     elif ext == ".pdf":
-        import PyPDF2
-        text = ""
-        with open(document.path, "rb") as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-        return text
+        import fitz
+        doc = fitz.open(document.path)
+        pages = [page.get_text("text") for page in doc]
+        doc.close()
+        return "\n\n".join(p for p in pages if p.strip())
+    elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"):
+        from ..rag.vision_extractor import vision_extractor
+        return vision_extractor.extract_from_image(document.path)
     raise ValueError(f"Unsupported file type: {ext}")
 
 
@@ -88,8 +87,9 @@ def chat(request):
     # Mode C — RAG retrieval; optional doc_id scopes to a single doc      #
     # ------------------------------------------------------------------ #
     context_passages = []
+    agent_trace = None
+
     if mode == "C":
-        # If a specific document was selected, resolve it for the chat log
         if doc_id:
             try:
                 document = Document.objects.get(id=doc_id, user=request.user)
@@ -114,12 +114,34 @@ def chat(request):
             logger.warning(f"RAG retrieval failed: {e}", exc_info=True)
 
     # ------------------------------------------------------------------ #
+    # Mode D — Agentic Case Q&A                                           #
+    # ------------------------------------------------------------------ #
+    elif mode == "D":
+        case_id = data.get("case_id")
+        try:
+            from ..rag.case_retrieval import case_retrieval_service
+            retrieval_result = case_retrieval_service.retrieve_for_case(
+                query=message,
+                case_id=case_id,
+                user_id=request.user.id,
+                k=8,
+            )
+            context_passages = retrieval_result.get("passages", [])
+            agent_trace = retrieval_result.get("agent_trace")
+            logger.info(
+                f"Mode D: {len(context_passages)} passages from case {case_id}, "
+                f"agent selected {len(agent_trace.get('selected_docs', []))} docs"
+            )
+        except Exception as e:
+            logger.warning(f"Case RAG retrieval failed: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------ #
     # Dispatch                                                             #
     # ------------------------------------------------------------------ #
     if do_stream:
         return _streaming_response(
             request, mode, message, document, document_text,
-            document_title, context_passages, filters,
+            document_title, context_passages, filters, agent_trace=agent_trace,
         )
 
     try:
@@ -129,6 +151,7 @@ def chat(request):
             document_text=document_text,
             document_title=document_title,
             context_passages=context_passages,
+            agent_trace=agent_trace,
             filters=filters,
             stream=False,
         )
@@ -160,19 +183,20 @@ def chat(request):
             meta_json={"mode": mode, "chat_log_id": chat_log.id},
         )
 
-        return Response({
-            "success": True,
-            "data": {
-                "chat_log_id": chat_log.id,
-                "mode": mode,
-                "response": result["response"],
-                "processed": result.get("processed"),
-                "citations": citations,
-                "tokens_in": result.get("tokens_in", 0),
-                "tokens_out": result.get("tokens_out", 0),
-                "latency_ms": result.get("latency_ms", 0),
-            },
-        })
+        response_data = {
+            "chat_log_id": chat_log.id,
+            "mode": mode,
+            "response": result["response"],
+            "processed": result.get("processed"),
+            "citations": citations,
+            "tokens_in": result.get("tokens_in", 0),
+            "tokens_out": result.get("tokens_out", 0),
+            "latency_ms": result.get("latency_ms", 0),
+        }
+        if agent_trace:
+            response_data["agent_trace"] = agent_trace
+
+        return Response({"success": True, "data": response_data})
 
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
@@ -182,7 +206,7 @@ def chat(request):
 
 def _streaming_response(
     request, mode, message, document, document_text,
-    document_title, context_passages, filters,
+    document_title, context_passages, filters, agent_trace=None,
 ):
     """Return a Server-Sent Events streaming response."""
 
@@ -194,6 +218,7 @@ def _streaming_response(
                 document_text=document_text,
                 document_title=document_title,
                 context_passages=context_passages,
+                agent_trace=agent_trace,
                 filters=filters,
                 stream=True,
             )

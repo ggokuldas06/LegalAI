@@ -130,6 +130,58 @@ class CaseLawPrompt:
         ]
 
 
+class CaseAgentPrompt:
+    """Mode D: Agentic Case Q&A — multi-document context with agent trace disclosure."""
+
+    SYSTEM = (
+        "You are a precise legal research assistant working with a case file that contains "
+        "multiple documents and images. "
+        "An intelligent routing agent has already selected the most relevant documents for your query. "
+        "Answer using ONLY the provided sources. "
+        "Choose the format that best fits the question:\n\n"
+        "• **Factual lookup** (who, what, when, how much, which section): "
+        "Answer directly in 1–3 sentences with inline citations as [Source N] or [Doc: Title, Section X].\n\n"
+        "• **Legal analysis** (whether X is permitted, analyse a clause, compare obligations, risks): "
+        "Use IRAC structure — Issue, Rule, Application, Conclusion — with citations.\n\n"
+        "• **Cross-document comparison** (how do these documents relate, what conflicts exist): "
+        "Address each document in turn, then synthesize.\n\n"
+        "RULES: Cite every factual claim. If sources lack the answer, say exactly: "
+        "'The provided sources do not contain enough information to answer this question.' "
+        "Never invent facts, names, numbers, or clauses."
+    )
+
+    @classmethod
+    def build_messages(cls, question: str, context_passages: List[Dict], agent_trace: Optional[Dict] = None) -> List[Dict]:
+        ctx = ""
+        for i, p in enumerate(context_passages, 1):
+            title = p.get("case_name") or p.get("title", "Unknown")
+            year = p.get("year", "n.d.")
+            heading = p.get("heading", "")
+            section = p.get("section_path", "")
+            file_type = p.get("file_type", "pdf")
+            text = p.get("text", "")
+            loc = f" — {heading or section}" if (heading or section) else ""
+            type_note = f" [{file_type.upper()}]" if file_type == "image" else ""
+            ctx += f"\n[Source {i}] {title} ({year}){loc}{type_note}:\n{text}\n"
+
+        trace_note = ""
+        if agent_trace and agent_trace.get("selected_docs"):
+            selected = agent_trace["selected_docs"]
+            titles = ", ".join(f"'{d['title']}'" for d in selected)
+            trace_note = f"\n\n*[Agent selected {len(selected)} document(s) for this query: {titles}]*\n"
+
+        user = (
+            f"**Question:** {question}\n\n"
+            f"**Relevant Sources from Case:{trace_note}**\n{ctx}\n\n"
+            "Choose the appropriate format (direct answer or IRAC or cross-document comparison) "
+            "based on the question type. Answer using ONLY the sources above. Cite every claim."
+        )
+        return [
+            {"role": "system", "content": cls.SYSTEM},
+            {"role": "user", "content": user},
+        ]
+
+
 class PromptBuilder:
     """Factory: build Ollama chat messages for each mode."""
 
@@ -150,6 +202,12 @@ class PromptBuilder:
             return CaseLawPrompt.build_messages(
                 question=kwargs["question"],
                 context_passages=kwargs.get("context_passages", []),
+            )
+        elif mode == "D":
+            return CaseAgentPrompt.build_messages(
+                question=kwargs["question"],
+                context_passages=kwargs.get("context_passages", []),
+                agent_trace=kwargs.get("agent_trace"),
             )
         else:
             raise ValueError(f"Unknown mode: {mode}")

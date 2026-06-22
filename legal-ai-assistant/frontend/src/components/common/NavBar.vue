@@ -31,6 +31,12 @@
             </router-link>
           </li>
           <li class="nav-item">
+            <router-link to="/cases" class="nav-link" active-class="active">
+              <i class="bi bi-briefcase me-1"></i>
+              Cases
+            </router-link>
+          </li>
+          <li class="nav-item">
             <router-link to="/history" class="nav-link" active-class="active">
               <i class="bi bi-clock-history me-1"></i>
               History

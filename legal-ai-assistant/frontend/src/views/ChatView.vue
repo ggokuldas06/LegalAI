@@ -17,12 +17,18 @@
               <ModeSelector v-model="chatStore.currentMode" @update:model-value="handleModeChange" />
             </div>
 
-            <div class="mb-3">
+            <!-- Modes A/B/C use document selector -->
+            <div v-if="chatStore.currentMode !== 'D'" class="mb-3">
               <DocumentSelector
                 v-model="selectedDocument"
                 :mode="chatStore.currentMode"
                 :is-required="chatStore.currentMode !== 'C'"
               />
+            </div>
+
+            <!-- Mode D uses case selector -->
+            <div v-if="chatStore.currentMode === 'D'" class="mb-3">
+              <CaseSelector v-model="selectedCase" />
             </div>
 
             <div v-if="chatStore.currentMode === 'C'" class="mb-3">
@@ -56,6 +62,10 @@
                 </small>
                 <small v-else-if="chatStore.currentMode === 'C'" class="text-muted">
                   Searching all indexed documents
+                </small>
+                <small v-else-if="chatStore.currentMode === 'D' && selectedCase" class="text-muted">
+                  <i class="bi bi-robot me-1"></i>
+                  Agent routing across: {{ selectedCase.title }} ({{ selectedCase.document_count }} docs)
                 </small>
               </div>
               <span class="badge bg-primary">{{ chatStore.messages.length }} messages</span>
@@ -108,11 +118,11 @@
               </button>
             </div>
 
-            <!-- Mode C — normal text input -->
+            <!-- Mode C / D — text input -->
             <ChatInput
               v-else
-              :disabled="chatStore.isLoading"
-              placeholder="Ask a legal question…"
+              :disabled="chatStore.isLoading || (chatStore.currentMode === 'D' && !selectedCase)"
+              :placeholder="chatStore.currentMode === 'D' ? 'Ask a question about this case…' : 'Ask a legal question…'"
               @send="handleSendMessage"
             />
 
@@ -129,6 +139,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import ModeSelector from '@/components/chat/ModeSelector.vue'
 import DocumentSelector from '@/components/chat/DocumentSelector.vue'
+import CaseSelector from '@/components/chat/CaseSelector.vue'
 import FilterPanel from '@/components/chat/FilterPanel.vue'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
@@ -136,23 +147,28 @@ import ChatInput from '@/components/chat/ChatInput.vue'
 const chatStore = useChatStore()
 const messagesContainer = ref(null)
 const selectedDocument = ref(null)
+const selectedCase = ref(null)
 
 const emptyStateTitle = computed(() => {
   if (chatStore.currentMode === 'A') return 'Document Summariser'
   if (chatStore.currentMode === 'B') return 'Clause Classifier'
+  if (chatStore.currentMode === 'D') return 'Case Agentic Q&A'
   return 'Legal Research Assistant'
 })
 
 const emptyStateMessage = computed(() => {
   if (chatStore.currentMode === 'A') return 'Select a document in the sidebar, then click Summarise Document.'
   if (chatStore.currentMode === 'B') return 'Select a document in the sidebar, then click Extract & Classify Clauses.'
+  if (chatStore.currentMode === 'D') return 'Select a case from the sidebar. The agent will decide which documents to retrieve from when you ask a question.'
   return 'Ask any legal question. Optionally filter to a specific indexed document.'
 })
 
 const handleModeChange = () => {
   chatStore.clearMessages()
   selectedDocument.value = null
+  selectedCase.value = null
   chatStore.setDocument(null)
+  chatStore.setCase(null)
 }
 
 // Modes A / B — fire a fixed trigger message; backend uses document text, not the message
@@ -166,9 +182,10 @@ const handleActionButton = async () => {
   scrollToBottom()
 }
 
-// Mode C — user types a question
+// Mode C / D — user types a question
 const handleSendMessage = async (message) => {
   chatStore.setDocument(selectedDocument.value)
+  chatStore.setCase(selectedCase.value)
   await chatStore.sendMessage(message)
   await nextTick()
   scrollToBottom()

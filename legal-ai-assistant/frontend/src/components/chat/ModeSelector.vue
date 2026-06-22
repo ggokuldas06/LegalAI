@@ -53,6 +53,12 @@ const modes = [
     description: 'Legal research with citations',
     icon: 'bi bi-book',
   },
+  {
+    value: 'D',
+    label: 'Case Q&A',
+    description: 'Agentic multi-document RAG',
+    icon: 'bi bi-robot',
+  },
 ]
 </script>
 

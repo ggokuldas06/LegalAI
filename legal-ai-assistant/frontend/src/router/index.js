@@ -36,6 +36,16 @@ const routes = [
     component: () => import('@/views/DocumentsView.vue'),
   },
   {
+    path: '/cases',
+    name: 'Cases',
+    component: () => import('@/views/CasesView.vue'),
+  },
+  {
+    path: '/cases/:id',
+    name: 'CaseDetail',
+    component: () => import('@/views/CaseDetailView.vue'),
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },

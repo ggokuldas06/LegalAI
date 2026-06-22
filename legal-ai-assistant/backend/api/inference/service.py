@@ -25,6 +25,7 @@ class InferenceService:
         document_text: Optional[str] = None,
         document_title: Optional[str] = None,
         context_passages: Optional[list] = None,
+        agent_trace: Optional[Dict] = None,
         filters: Optional[Dict] = None,
         settings_override: Optional[Dict] = None,
         stream: bool = False,
@@ -52,6 +53,12 @@ class InferenceService:
                     question=message,
                     context_passages=context_passages or [],
                 )
+            elif mode == "D":
+                kwargs.update(
+                    question=message,
+                    context_passages=context_passages or [],
+                    agent_trace=agent_trace,
+                )
 
             messages = PromptBuilder.build_messages(**kwargs)
 
@@ -72,14 +79,14 @@ class InferenceService:
             )
 
             if stream:
-                return self._stream_response(messages, mode, tokens_in, **gen_kwargs)
+                return self._stream_response(messages, mode, tokens_in, agent_trace=agent_trace, **gen_kwargs)
 
             response = self.engine.generate(messages=messages, **gen_kwargs)
             processed = self._process_response(mode, response["text"])
             final_text = response["text"] + LEGAL_DISCLAIMER
             latency_ms = int((time.time() - start) * 1000)
 
-            return {
+            result = {
                 "success": True,
                 "mode": mode,
                 "response": final_text,
@@ -89,6 +96,9 @@ class InferenceService:
                 "latency_ms": latency_ms,
                 "finish_reason": response.get("finish_reason", "stop"),
             }
+            if agent_trace:
+                result["agent_trace"] = agent_trace
+            return result
 
         except Exception as e:
             logger.error(f"Inference error: {e}", exc_info=True)
@@ -104,10 +114,14 @@ class InferenceService:
         messages: List[Dict],
         mode: str,
         tokens_in: int,
+        agent_trace: Optional[Dict] = None,
         **gen_kwargs,
     ) -> Iterator[Dict[str, Any]]:
         try:
-            yield {"type": "start", "mode": mode, "tokens_in": tokens_in}
+            start_payload: Dict[str, Any] = {"type": "start", "mode": mode, "tokens_in": tokens_in}
+            if agent_trace:
+                start_payload["agent_trace"] = agent_trace
+            yield start_payload
 
             for token in self.engine.generate_stream(messages=messages, **gen_kwargs):
                 yield {"type": "token", "token": token}
@@ -123,7 +137,7 @@ class InferenceService:
             return self.processor.process_mode_a(text)
         elif mode == "B":
             return self.processor.process_mode_b(text)
-        elif mode == "C":
+        elif mode in ("C", "D"):
             return self.processor.process_mode_c(text)
         return {"raw_response": text}
 

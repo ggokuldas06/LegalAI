@@ -4,11 +4,10 @@ from rest_framework.decorators import api_view, permission_classes, parser_class
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from django.core.files.storage import default_storage
 from django.conf import settings
 import os
 import hashlib
-import PyPDF2
+import fitz  # pymupdf
 
 from ..serializers import DocumentSerializer
 from ..models import Document, AuditLog
@@ -16,6 +15,9 @@ from ..utils.helpers import get_client_ip, get_user_agent
 
 import logging
 logger = logging.getLogger(__name__)
+
+ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.md', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp'}
 
 
 @api_view(['GET'])
@@ -110,10 +112,10 @@ def document_upload(request):
     
     # Validate file type
     file_ext = os.path.splitext(file_obj.name)[1].lower()
-    if file_ext not in ['.pdf', '.txt', '.md']:
+    if file_ext not in ALLOWED_EXTENSIONS:
         return Response({
             'success': False,
-            'error': 'Only PDF, TXT, and MD files are supported'
+            'error': f'Unsupported file type. Allowed: {", ".join(sorted(ALLOWED_EXTENSIONS))}'
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
@@ -147,23 +149,26 @@ def document_upload(request):
         # Extract metadata
         meta_json = {}
         page_count = 0
-        
+        file_type = 'text'
+
         if file_ext == '.pdf':
+            file_type = 'pdf'
             try:
-                with open(file_path, 'rb') as pdf_file:
-                    pdf_reader = PyPDF2.PdfReader(pdf_file)
-                    page_count = len(pdf_reader.pages)
-                    
-                    # Extract metadata
-                    if pdf_reader.metadata:
-                        meta_json['pdf_metadata'] = {
-                            'author': pdf_reader.metadata.get('/Author'),
-                            'creator': pdf_reader.metadata.get('/Creator'),
-                            'producer': pdf_reader.metadata.get('/Producer'),
-                            'subject': pdf_reader.metadata.get('/Subject'),
-                        }
+                doc = fitz.open(file_path)
+                page_count = len(doc)
+                fitz_meta = doc.metadata or {}
+                doc.close()
+                meta_json['pdf_metadata'] = {
+                    'author': fitz_meta.get('author'),
+                    'creator': fitz_meta.get('creator'),
+                    'producer': fitz_meta.get('producer'),
+                    'subject': fitz_meta.get('subject'),
+                }
             except Exception as e:
                 logger.warning(f"Could not extract PDF metadata: {e}")
+        elif file_ext in IMAGE_EXTENSIONS:
+            file_type = 'image'
+            page_count = 1
         
         # Create document record
         document = Document.objects.create(
@@ -175,7 +180,9 @@ def document_upload(request):
             path=file_path,
             source=source,
             sha256=sha256,
-            meta_json=meta_json
+            meta_json=meta_json,
+            file_type=file_type,
+            page_count=page_count,
         )
         
         # Audit log
@@ -263,45 +270,75 @@ def document_content(request, doc_id):
     """
     try:
         document = Document.objects.get(id=doc_id, user=request.user)
-        
-        # Read file content
         file_ext = os.path.splitext(document.path)[1].lower()
-        
+
         if file_ext in ('.txt', '.md'):
-            with open(document.path, 'r', encoding='utf-8') as f:
+            with open(document.path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
 
         elif file_ext == '.pdf':
-            content = ""
-            with open(document.path, 'rb') as pdf_file:
-                pdf_reader = PyPDF2.PdfReader(pdf_file)
-                for page in pdf_reader.pages:
-                    content += page.extract_text() + "\n"
-        
+            doc = fitz.open(document.path)
+            pages = [page.get_text("text") for page in doc]
+            doc.close()
+            content = "\n\n".join(p for p in pages if p.strip())
+
+        elif file_ext in IMAGE_EXTENSIONS:
+            # Return description if available, otherwise note it's an image
+            if document.doc_description:
+                import json as _json
+                try:
+                    desc = _json.loads(document.doc_description)
+                    content = desc.get("summary", "Image document — ingest to extract content.")
+                except Exception:
+                    content = document.doc_description
+            else:
+                content = "Image document. Ingest this document to extract its text content via vision model."
+
         else:
-            return Response({
-                'success': False,
-                'error': 'Unsupported file type'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response({'success': False, 'error': 'Unsupported file type'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'success': True,
             'data': {
                 'document_id': document.id,
                 'title': document.title,
+                'file_type': document.file_type,
                 'content': content,
                 'length': len(content),
-            }
+            },
         })
-        
+
     except Document.DoesNotExist:
-        return Response({
-            'success': False,
-            'error': 'Document not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': False, 'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         logger.error(f"Error reading document: {e}", exc_info=True)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def document_describe(request, doc_id):
+    """
+    Trigger (re)generation of routing description for a document.
+    POST /api/v1/documents/<id>/describe
+    """
+    try:
+        document = Document.objects.get(id=doc_id, user=request.user)
+    except Document.DoesNotExist:
+        return Response({'success': False, 'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        from ..rag.ingestion import ingestion_service
+        text = ingestion_service._extract_text(document)
+        ingestion_service._generate_description(document, text)
         return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            'success': True,
+            'data': {
+                'document_id': document.id,
+                'description': document.doc_description,
+            },
+        })
+    except Exception as e:
+        logger.error(f"Describe error for doc {doc_id}: {e}", exc_info=True)
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
